@@ -10,11 +10,11 @@ cpi_data['Date'] = pd.to_datetime(cpi_data['Date'], format='%d/%m/%Y')
 # Set the Date column as the index
 cpi_data.set_index('Date', inplace=True)
 
-# Resample the data to a daily frequency, using linear interpolation for the CPI_MoM values
-daily_cpi = cpi_data.resample('D').interpolate(method='linear')
+# We now directly interpolate the cumulative inflation
+cpi_data['Cumulative_Inflation'] = (1 + cpi_data['CPI_MoM']).cumprod()
 
-# Calculate daily cumulative inflation based on the interpolated MoM rates
-daily_cpi['Cumulative_Inflation'] = (1 + daily_cpi['CPI_MoM']).cumprod()
+# Resample the data to a daily frequency, interpolating cumulative inflation values directly
+daily_cpi = cpi_data['Cumulative_Inflation'].resample('D').interpolate(method='linear')
 
 # Create a Streamlit app
 st.title('Inflation Adjustment Calculator')
@@ -25,8 +25,8 @@ start_date = st.date_input('Select the start date:', min_value=daily_cpi.index.m
 end_date = st.date_input('Select the end date:', min_value=daily_cpi.index.min().date(), max_value=daily_cpi.index.max().date(), value=daily_cpi.index.max().date())
 
 # Filter the data for the selected dates
-start_inflation = daily_cpi.loc[pd.to_datetime(start_date)]['Cumulative_Inflation']
-end_inflation = daily_cpi.loc[pd.to_datetime(end_date)]['Cumulative_Inflation']
+start_inflation = daily_cpi.loc[pd.to_datetime(start_date)]
+end_inflation = daily_cpi.loc[pd.to_datetime(end_date)]
 
 # Calculate the adjusted value
 adjusted_value = initial_value * (end_inflation / start_inflation)
