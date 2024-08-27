@@ -1,10 +1,13 @@
 import streamlit as st
 import pandas as pd
-import datetime
 
 # Load the inflation data from the CSV file
 cpi_data = pd.read_csv('inflaciónargentina2.csv')
 
+# Display the column names to help diagnose the issue
+st.write("Column names in the uploaded CSV file:", cpi_data.columns)
+
+# Assuming the columns are 'Date' and 'CPI_MoM', continue with the processing
 # Ensure the Date column is in datetime format
 cpi_data['Date'] = pd.to_datetime(cpi_data['Date'])
 
