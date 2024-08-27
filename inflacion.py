@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import yfinance as yf
 import matplotlib.pyplot as plt
+import datetime
 
 # Load the inflation data from the CSV file
 cpi_data = pd.read_csv('inflaciónargentina2.csv')
@@ -58,22 +59,28 @@ else:
 ticker = st.text_input('Enter a stock ticker (e.g., MSFT):')
 
 if ticker:
-    # Fetch historical stock data
-    stock_data = yf.download(ticker, start=daily_cpi.index.min().date(), end=daily_cpi.index.max().date())
-    
-    # Ensure the Date column is in datetime format
-    stock_data.index = pd.to_datetime(stock_data.index)
+    try:
+        # Fetch historical stock data
+        stock_data = yf.download(ticker, start=daily_cpi.index.min().date(), end=daily_cpi.index.max().date())
+        
+        if stock_data.empty:
+            st.error("No data found for the provided ticker.")
+        else:
+            # Ensure the Date column is in datetime format
+            stock_data.index = pd.to_datetime(stock_data.index)
 
-    # Adjust stock prices for inflation
-    stock_data['Inflation_Adjusted_Close'] = stock_data['Close'] * (daily_cpi.loc[stock_data.index[-1]] / daily_cpi.loc[stock_data.index])
+            # Adjust stock prices for inflation
+            stock_data['Inflation_Adjusted_Close'] = stock_data['Close'] * (daily_cpi.loc[stock_data.index[-1]] / daily_cpi.loc[stock_data.index])
 
-    # Plot the adjusted stock prices
-    plt.figure(figsize=(12, 6))
-    plt.plot(stock_data.index, stock_data['Inflation_Adjusted_Close'], label='Inflation Adjusted Close Price')
-    plt.title(f'Inflation Adjusted Historical Prices for {ticker}')
-    plt.xlabel('Date')
-    plt.ylabel('Adjusted Close Price (ARS)')
-    plt.grid(True)
-    plt.legend()
+            # Plot the adjusted stock prices
+            plt.figure(figsize=(12, 6))
+            plt.plot(stock_data.index, stock_data['Inflation_Adjusted_Close'], label='Inflation Adjusted Close Price')
+            plt.title(f'Inflation Adjusted Historical Prices for {ticker}')
+            plt.xlabel('Date')
+            plt.ylabel('Adjusted Close Price (ARS)')
+            plt.grid(True)
+            plt.legend()
 
-    st.pyplot(plt)
+            st.pyplot(plt)
+    except Exception as e:
+        st.error(f"An error occurred: {e}")
