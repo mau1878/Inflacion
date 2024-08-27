@@ -10,10 +10,10 @@ cpi_data['Date'] = pd.to_datetime(cpi_data['Date'], format='%d/%m/%Y')
 # Set the Date column as the index
 cpi_data.set_index('Date', inplace=True)
 
-# Resample the data to a daily frequency, using linear interpolation to fill in the gaps
+# Resample the data to a daily frequency, using linear interpolation for the CPI_MoM values
 daily_cpi = cpi_data.resample('D').interpolate(method='linear')
 
-# Calculate the cumulative inflation for the daily data
+# Calculate daily cumulative inflation based on the interpolated MoM rates
 daily_cpi['Cumulative_Inflation'] = (1 + daily_cpi['CPI_MoM']).cumprod()
 
 # Create a Streamlit app
