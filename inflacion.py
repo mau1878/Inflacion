@@ -3,7 +3,7 @@ import pandas as pd
 import datetime
 
 # Load the inflation data from the CSV file
-cpi_data = pd.read_csv('/mnt/data/inflaciónargentina2.csv')
+cpi_data = pd.read_csv('inflaciónargentina2.csv')
 
 # Ensure the Date column is in datetime format
 cpi_data['Date'] = pd.to_datetime(cpi_data['Date'])
