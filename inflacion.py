@@ -19,6 +19,9 @@ daily_cpi = cpi_data['Cumulative_Inflation'].resample('D').interpolate(method='l
 # Create a Streamlit app
 st.title('Ajustadora de acciones del Merval por inflación - MTaurus - https://x.com/MTaurus_ok')
 
+# Subheader for the inflation calculator
+st.subheader('1-Calculadorita pedorra de precios por inflación. Más abajo la de acciones.')
+
 # User input: choose to enter the value for the start date or end date
 value_choice = st.radio(
     "¿Quieres ingresar el valor para la fecha de inicio o la fecha de fin?",
