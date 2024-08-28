@@ -17,7 +17,7 @@ cpi_data['Cumulative_Inflation'] = (1 + cpi_data['CPI_MoM']).cumprod()
 daily_cpi = cpi_data['Cumulative_Inflation'].resample('D').interpolate(method='linear')
 
 # Create a Streamlit app
-st.title('Calculadora de Ajuste por Inflación')
+st.title('Ajustadora de acciones del Merval por inflación - MTaurus - https://x.com/MTaurus_ok')
 
 # User input: choose to enter the value for the start date or end date
 value_choice = st.radio(
@@ -92,9 +92,12 @@ else:
     st.write(f"Valor ajustado el {start_date}: ARS {start_value:.2f}")
     st.write(f"Valor final el {end_date}: ARS {end_value}")
 
+# Big title
+st.subheader('Ajustadora de acciones del Merval por inflación - MTaurus - https://x.com/MTaurus_ok')
+
 # User input: enter stock tickers (multiple tickers separated by commas)
 tickers_input = st.text_input(
-    'Ingresa los tickers de acciones separados por comas (por ejemplo, MSFT, AAPL):',
+    'Ingresa los tickers de acciones separados por comas (por ejemplo, GGAL.BA, CGPA2.BA):',
     key='tickers_input'
 )
 
