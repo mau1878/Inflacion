@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import yfinance as yf
-import matplotlib.pyplot as plt
 import plotly.graph_objs as go
 
 # Load the inflation data from the CSV file
@@ -93,20 +92,26 @@ else:
     st.write(f"Adjusted Value on {start_date}: ARS {start_value:.2f}")
     st.write(f"Final Value on {end_date}: ARS {end_value}")
 
-# User input: enter the stock ticker
-ticker = st.text_input(
-    'Enter a stock ticker (e.g., MSFT):',
-    key='ticker_input'
+# User input: enter stock tickers (multiple tickers separated by commas)
+tickers_input = st.text_input(
+    'Enter stock tickers separated by commas (e.g., MSFT, AAPL):',
+    key='tickers_input'
 )
 
-if ticker:
-    try:
-        # Fetch historical stock data
-        stock_data = yf.download(ticker, start=daily_cpi.index.min().date(), end=daily_cpi.index.max().date())
-        
-        if stock_data.empty:
-            st.error("No data found for the provided ticker.")
-        else:
+if tickers_input:
+    tickers = [ticker.strip().upper() for ticker in tickers_input.split(',')]
+
+    fig = go.Figure()
+
+    for ticker in tickers:
+        try:
+            # Fetch historical stock data
+            stock_data = yf.download(ticker, start=daily_cpi.index.min().date(), end=daily_cpi.index.max().date())
+            
+            if stock_data.empty:
+                st.error(f"No data found for ticker {ticker}.")
+                continue
+
             # Ensure the Date column is in datetime format
             stock_data.index = pd.to_datetime(stock_data.index)
 
@@ -114,13 +119,15 @@ if ticker:
             stock_data['Inflation_Adjusted_Close'] = stock_data['Close'] * (daily_cpi.loc[stock_data.index[-1]] / daily_cpi.loc[stock_data.index])
 
             # Plot the adjusted stock prices
-            fig = go.Figure()
             fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['Inflation_Adjusted_Close'],
-                                     mode='lines', name='Inflation Adjusted Close Price'))
-            fig.update_layout(title=f'Inflation Adjusted Historical Prices for {ticker}',
-                              xaxis_title='Date',
-                              yaxis_title='Adjusted Close Price (ARS)')
-            
-            st.plotly_chart(fig)
-    except Exception as e:
-        st.error(f"An error occurred: {e}")
+                                     mode='lines', name=ticker))
+        
+        except Exception as e:
+            st.error(f"An error occurred for ticker {ticker}: {e}")
+
+    # Update layout for the plot
+    fig.update_layout(title='Inflation Adjusted Historical Prices',
+                      xaxis_title='Date',
+                      yaxis_title='Adjusted Close Price (ARS)')
+
+    st.plotly_chart(fig)
