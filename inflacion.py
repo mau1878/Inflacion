@@ -98,9 +98,17 @@ tickers_input = st.text_input(
     key='tickers_input'
 )
 
+# User input: choose the SMA period for the first ticker
+sma_period = st.number_input(
+    'Enter the number of periods for the SMA of the first ticker:',
+    min_value=1,
+    value=10,
+    key='sma_period_input'
+)
+
 if tickers_input:
     tickers = [ticker.strip().upper() for ticker in tickers_input.split(',')]
-    
+
     fig = go.Figure()
 
     for i, ticker in enumerate(tickers):
@@ -121,19 +129,25 @@ if tickers_input:
             # Plot the adjusted stock prices
             fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['Inflation_Adjusted_Close'],
                                      mode='lines', name=ticker))
-            
-            # If this is the first ticker, calculate and plot the average price as a dotted line
+
+            # Plot the average price as a dotted line
+            avg_price = stock_data['Inflation_Adjusted_Close'].mean()
+            fig.add_trace(go.Scatter(x=stock_data.index, y=[avg_price] * len(stock_data),
+                                     mode='lines', name=f'{ticker} Avg Price',
+                                     line=dict(dash='dot')))
+
+            # Plot the SMA for the first ticker only
             if i == 0:
-                avg_price = stock_data['Inflation_Adjusted_Close'].mean()
-                fig.add_trace(go.Scatter(x=stock_data.index, y=[avg_price] * len(stock_data),
-                                         mode='lines', name=f'{ticker} Average',
-                                         line=dict(dash='dot', color='red')))
+                stock_data['SMA'] = stock_data['Inflation_Adjusted_Close'].rolling(window=sma_period).mean()
+                fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['SMA'],
+                                         mode='lines', name=f'{ticker} {sma_period}-Period SMA',
+                                         line=dict(color='orange')))
         
         except Exception as e:
             st.error(f"An error occurred for ticker {ticker}: {e}")
 
     # Update layout for the plot
-    fig.update_layout(title='Inflation Adjusted Historical Prices',
+    fig.update_layout(title='Inflation Adjusted Historical Prices with Average and SMA',
                       xaxis_title='Date',
                       yaxis_title='Adjusted Close Price (ARS)')
 
