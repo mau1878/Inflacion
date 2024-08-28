@@ -106,6 +106,15 @@ sma_period = st.number_input(
     key='sma_period_input'
 )
 
+# User input: select the start date for the data shown in the plot
+plot_start_date = st.date_input(
+    'Selecciona la fecha de inicio para los datos mostrados en el gráfico:',
+    min_value=daily_cpi.index.min().date(),
+    max_value=daily_cpi.index.max().date(),
+    value=daily_cpi.index.min().date(),
+    key='plot_start_date_input'
+)
+
 if tickers_input:
     tickers = [ticker.strip().upper() for ticker in tickers_input.split(',')]
 
@@ -113,8 +122,8 @@ if tickers_input:
 
     for i, ticker in enumerate(tickers):
         try:
-            # Fetch historical stock data
-            stock_data = yf.download(ticker, start=daily_cpi.index.min().date(), end=daily_cpi.index.max().date())
+            # Fetch historical stock data starting from the user-selected plot start date
+            stock_data = yf.download(ticker, start=plot_start_date, end=daily_cpi.index.max().date())
             
             if stock_data.empty:
                 st.error(f"No se encontraron datos para el ticker {ticker}.")
