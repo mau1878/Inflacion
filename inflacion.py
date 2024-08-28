@@ -96,7 +96,7 @@ else:
     st.write(f"Valor final el {end_date}: ARS {end_value}")
 
 # Big title
-st.subheader('Ajustadora de acciones del Merval por inflación - MTaurus - https://x.com/MTaurus_ok')
+st.subheader('2- Ajustadora de acciones del Merval por inflación - MTaurus - https://x.com/MTaurus_ok')
 
 # User input: enter stock tickers (multiple tickers separated by commas)
 tickers_input = st.text_input(
