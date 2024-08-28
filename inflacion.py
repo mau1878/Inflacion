@@ -17,32 +17,32 @@ cpi_data['Cumulative_Inflation'] = (1 + cpi_data['CPI_MoM']).cumprod()
 daily_cpi = cpi_data['Cumulative_Inflation'].resample('D').interpolate(method='linear')
 
 # Create a Streamlit app
-st.title('Inflation Adjustment Calculator')
+st.title('Calculadora de Ajuste por Inflación')
 
 # User input: choose to enter the value for the start date or end date
 value_choice = st.radio(
-    "Do you want to enter the value for the start date or end date?",
-    ('Start Date', 'End Date'),
+    "¿Quieres ingresar el valor para la fecha de inicio o la fecha de fin?",
+    ('Fecha de Inicio', 'Fecha de Fin'),
     key='value_choice_radio'
 )
 
-if value_choice == 'Start Date':
+if value_choice == 'Fecha de Inicio':
     start_date = st.date_input(
-        'Select the start date:',
+        'Selecciona la fecha de inicio:',
         min_value=daily_cpi.index.min().date(),
         max_value=daily_cpi.index.max().date(),
         value=daily_cpi.index.min().date(),
         key='start_date_input'
     )
     end_date = st.date_input(
-        'Select the end date:',
+        'Selecciona la fecha de fin:',
         min_value=daily_cpi.index.min().date(),
         max_value=daily_cpi.index.max().date(),
         value=daily_cpi.index.max().date(),
         key='end_date_input'
     )
     start_value = st.number_input(
-        'Enter the value on the start date (in ARS):',
+        'Ingresa el valor en la fecha de inicio (en ARS):',
         min_value=0.0,
         value=100.0,
         key='start_value_input'
@@ -56,26 +56,26 @@ if value_choice == 'Start Date':
     end_value = start_value * (end_inflation / start_inflation)
 
     # Display the results
-    st.write(f"Initial Value on {start_date}: ARS {start_value}")
-    st.write(f"Adjusted Value on {end_date}: ARS {end_value:.2f}")
+    st.write(f"Valor inicial el {start_date}: ARS {start_value}")
+    st.write(f"Valor ajustado el {end_date}: ARS {end_value:.2f}")
 
 else:
     start_date = st.date_input(
-        'Select the start date:',
+        'Selecciona la fecha de inicio:',
         min_value=daily_cpi.index.min().date(),
         max_value=daily_cpi.index.max().date(),
         value=daily_cpi.index.min().date(),
         key='start_date_end_date_input'
     )
     end_date = st.date_input(
-        'Select the end date:',
+        'Selecciona la fecha de fin:',
         min_value=daily_cpi.index.min().date(),
         max_value=daily_cpi.index.max().date(),
         value=daily_cpi.index.max().date(),
         key='end_date_end_date_input'
     )
     end_value = st.number_input(
-        'Enter the value on the end date (in ARS):',
+        'Ingresa el valor en la fecha de fin (en ARS):',
         min_value=0.0,
         value=100.0,
         key='end_value_input'
@@ -89,18 +89,18 @@ else:
     start_value = end_value / (end_inflation / start_inflation)
 
     # Display the results
-    st.write(f"Adjusted Value on {start_date}: ARS {start_value:.2f}")
-    st.write(f"Final Value on {end_date}: ARS {end_value}")
+    st.write(f"Valor ajustado el {start_date}: ARS {start_value:.2f}")
+    st.write(f"Valor final el {end_date}: ARS {end_value}")
 
 # User input: enter stock tickers (multiple tickers separated by commas)
 tickers_input = st.text_input(
-    'Enter stock tickers separated by commas (e.g., MSFT, AAPL):',
+    'Ingresa los tickers de acciones separados por comas (por ejemplo, MSFT, AAPL):',
     key='tickers_input'
 )
 
 # User input: choose the SMA period for the first ticker
 sma_period = st.number_input(
-    'Enter the number of periods for the SMA of the first ticker:',
+    'Ingresa el número de periodos para el SMA del primer ticker:',
     min_value=1,
     value=10,
     key='sma_period_input'
@@ -117,7 +117,7 @@ if tickers_input:
             stock_data = yf.download(ticker, start=daily_cpi.index.min().date(), end=daily_cpi.index.max().date())
             
             if stock_data.empty:
-                st.error(f"No data found for ticker {ticker}.")
+                st.error(f"No se encontraron datos para el ticker {ticker}.")
                 continue
 
             # Ensure the Date column is in datetime format
@@ -133,22 +133,32 @@ if tickers_input:
             # Plot the average price as a dotted line
             avg_price = stock_data['Inflation_Adjusted_Close'].mean()
             fig.add_trace(go.Scatter(x=stock_data.index, y=[avg_price] * len(stock_data),
-                                     mode='lines', name=f'{ticker} Avg Price',
+                                     mode='lines', name=f'{ticker} Precio Promedio',
                                      line=dict(dash='dot')))
 
             # Plot the SMA for the first ticker only
             if i == 0:
                 stock_data['SMA'] = stock_data['Inflation_Adjusted_Close'].rolling(window=sma_period).mean()
                 fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['SMA'],
-                                         mode='lines', name=f'{ticker} {sma_period}-Period SMA',
+                                         mode='lines', name=f'{ticker} SMA de {sma_period} Periodos',
                                          line=dict(color='orange')))
         
         except Exception as e:
-            st.error(f"An error occurred for ticker {ticker}: {e}")
+            st.error(f"Ocurrió un error con el ticker {ticker}: {e}")
+
+    # Add a watermark to the plot
+    fig.add_annotation(
+        text="MTaurus - X: mtaurus_ok",
+        xref="paper", yref="paper",
+        x=0.5, y=0.5,
+        showarrow=False,
+        font=dict(size=30, color="rgba(150, 150, 150, 0.3)"),
+        opacity=0.2
+    )
 
     # Update layout for the plot
-    fig.update_layout(title='Inflation Adjusted Historical Prices with Average and SMA',
-                      xaxis_title='Date',
-                      yaxis_title='Adjusted Close Price (ARS)')
+    fig.update_layout(title='Precios Históricos Ajustados por Inflación con Promedio y SMA',
+                      xaxis_title='Fecha',
+                      yaxis_title='Precio de Cierre Ajustado (ARS)')
 
     st.plotly_chart(fig)
