@@ -100,10 +100,10 @@ tickers_input = st.text_input(
 
 if tickers_input:
     tickers = [ticker.strip().upper() for ticker in tickers_input.split(',')]
-
+    
     fig = go.Figure()
 
-    for ticker in tickers:
+    for i, ticker in enumerate(tickers):
         try:
             # Fetch historical stock data
             stock_data = yf.download(ticker, start=daily_cpi.index.min().date(), end=daily_cpi.index.max().date())
@@ -121,6 +121,13 @@ if tickers_input:
             # Plot the adjusted stock prices
             fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['Inflation_Adjusted_Close'],
                                      mode='lines', name=ticker))
+            
+            # If this is the first ticker, calculate and plot the average price as a dotted line
+            if i == 0:
+                avg_price = stock_data['Inflation_Adjusted_Close'].mean()
+                fig.add_trace(go.Scatter(x=stock_data.index, y=[avg_price] * len(stock_data),
+                                         mode='lines', name=f'{ticker} Average',
+                                         line=dict(dash='dot', color='red')))
         
         except Exception as e:
             st.error(f"An error occurred for ticker {ticker}: {e}")
