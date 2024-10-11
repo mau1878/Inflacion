@@ -1,3 +1,117 @@
+import streamlit as st
+import pandas as pd
+import yfinance as yf
+import plotly.graph_objs as go
+
+# Load the inflation data from the CSV file
+cpi_data = pd.read_csv('inflaciónargentina2.csv')
+
+# Ensure the Date column is in datetime format with the correct format
+cpi_data['Date'] = pd.to_datetime(cpi_data['Date'], format='%d/%m/%Y')
+
+# Set the Date column as the index
+cpi_data.set_index('Date', inplace=True)
+
+# Interpolate cumulative inflation directly
+cpi_data['Cumulative_Inflation'] = (1 + cpi_data['CPI_MoM']).cumprod()
+daily_cpi = cpi_data['Cumulative_Inflation'].resample('D').interpolate(method='linear')
+
+# Create a Streamlit app
+st.title('Ajustadora de acciones del Merval por inflación - MTaurus - https://x.com/MTaurus_ok')
+
+# Subheader for the inflation calculator
+st.subheader('1-Calculadorita pedorra de precios por inflación. Más abajo la de acciones.')
+
+# User input: choose to enter the value for the start date or end date
+value_choice = st.radio(
+    "¿Quieres ingresar el valor para la fecha de inicio o la fecha de fin?",
+    ('Fecha de Inicio', 'Fecha de Fin'),
+    key='value_choice_radio'
+)
+
+if value_choice == 'Fecha de Inicio':
+    start_date = st.date_input(
+        'Selecciona la fecha de inicio:',
+        min_value=daily_cpi.index.min().date(),
+        max_value=daily_cpi.index.max().date(),
+        value=daily_cpi.index.min().date(),
+        key='start_date_input'
+    )
+    end_date = st.date_input(
+        'Selecciona la fecha de fin:',
+        min_value=daily_cpi.index.min().date(),
+        max_value=daily_cpi.index.max().date(),
+        value=daily_cpi.index.max().date(),
+        key='end_date_input'
+    )
+    start_value = st.number_input(
+        'Ingresa el valor en la fecha de inicio (en ARS):',
+        min_value=0.0,
+        value=100.0,
+        key='start_value_input'
+    )
+
+    # Filter the data for the selected dates
+    start_inflation = daily_cpi.loc[pd.to_datetime(start_date)]
+    end_inflation = daily_cpi.loc[pd.to_datetime(end_date)]
+
+    # Calculate the adjusted value for the end date
+    end_value = start_value * (end_inflation / start_inflation)
+
+    # Display the results
+    st.write(f"Valor inicial el {start_date}: ARS {start_value}")
+    st.write(f"Valor ajustado el {end_date}: ARS {end_value:.2f}")
+
+else:
+    start_date = st.date_input(
+        'Selecciona la fecha de inicio:',
+        min_value=daily_cpi.index.min().date(),
+        max_value=daily_cpi.index.max().date(),
+        value=daily_cpi.index.min().date(),
+        key='start_date_end_date_input'
+    )
+    end_date = st.date_input(
+        'Selecciona la fecha de fin:',
+        min_value=daily_cpi.index.min().date(),
+        max_value=daily_cpi.index.max().date(),
+        value=daily_cpi.index.max().date(),
+        key='end_date_end_date_input'
+    )
+    end_value = st.number_input(
+        'Ingresa el valor en la fecha de fin (en ARS):',
+        min_value=0.0,
+        value=100.0,
+        key='end_value_input'
+    )
+
+    # Filter the data for the selected dates
+    start_inflation = daily_cpi.loc[pd.to_datetime(start_date)]
+    end_inflation = daily_cpi.loc[pd.to_datetime(end_date)]
+
+    # Calculate the adjusted value for the start date
+    start_value = end_value / (end_inflation / start_inflation)
+
+    # Display the results
+    st.write(f"Valor ajustado el {start_date}: ARS {start_value:.2f}")
+    st.write(f"Valor final el {end_date}: ARS {end_value}")
+
+# Big title
+st.subheader('2- Ajustadora de acciones del Merval por inflación - MTaurus - https://x.com/MTaurus_ok')
+
+# User input: enter stock tickers (multiple tickers separated by commas)
+tickers_input = st.text_input(
+    'Ingresa los tickers de acciones separados por comas (por ejemplo, GGAL.BA, CGPA2.BA):',
+    key='tickers_input'
+)
+
+# User input: choose the SMA period for the first ticker
+sma_period = st.number_input(
+    'Ingresa el número de periodos para el SMA del primer ticker:',
+    min_value=1,
+    value=10,
+    key='sma_period_input'
+)
+
 # User input: select the start date for the data shown in the plot
 plot_start_date = st.date_input(
     'Selecciona la fecha de inicio para los datos mostrados en el gráfico:',
