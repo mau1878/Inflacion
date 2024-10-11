@@ -3,110 +3,126 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 import plotly.express as px
-import logging
 
-# Initialize logger
-logger = logging.getLogger(__name__)
-
-# Diccionario de tickers y sus divisores
+# Diccionario de tickers y sus divisores (ajustes por splits)
 splits = {
-    'MMM.BA': 2,
-    'ADGO.BA': 1,
-    'ADBE.BA': 2,
-    'AEM.BA': 2,
-    'AMGN.BA': 3,
-    'AAPL.BA': 2,
-    'BAC.BA': 2,
-    'GOLD.BA': 2,
-    'BIOX.BA': 2,
-    'CVX.BA': 2,
-    'LLY.BA': 7,
-    'XOM.BA': 2,
-    'FSLR.BA': 6,
-    'IBM.BA': 3,
-    'JD.BA': 2,
-    'JPM.BA': 3,
-    'MELI.BA': 2,
-    'NFLX.BA': 3,
-    'PEP.BA': 3,
-    'PFE.BA': 2,
-    'PG.BA': 3,
-    'RIO.BA': 2,
-    'SONY.BA': 2,
-    'SBUX.BA': 3,
-    'TXR.BA': 2,
-    'BA.BA': 4,
-    'TM.BA': 3,
-    'VZ.BA': 2,
-    'VIST.BA': 3,
-    'WMT.BA': 3,
-    'AGRO.BA': (6, 2.1)  # Ajustes para AGRO.BA
+  'MMM.BA': 2,
+  'ADGO.BA': 1,
+  'ADBE.BA': 2,
+  'AEM.BA': 2,
+  'AMGN.BA': 3,
+  'AAPL.BA': 2,
+  'BAC.BA': 2,
+  'GOLD.BA': 2,
+  'BIOX.BA': 2,
+  'CVX.BA': 2,
+  'LLY.BA': 7,
+  'XOM.BA': 2,
+  'FSLR.BA': 6,
+  'IBM.BA': 3,
+  'JD.BA': 2,
+  'JPM.BA': 3,
+  'MELI.BA': 2,
+  'NFLX.BA': 3,
+  'PEP.BA': 3,
+  'PFE.BA': 2,
+  'PG.BA': 3,
+  'RIO.BA': 2,
+  'SONY.BA': 2,
+  'SBUX.BA': 3,
+  'TXR.BA': 2,
+  'BA.BA': 4,
+  'TM.BA': 3,
+  'VZ.BA': 2,
+  'VIST.BA': 3,
+  'WMT.BA': 3,
+  'AGRO.BA': (6, 2.1)  # Ajustes para AGRO.BA
 }
 
-# Function to adjust stock prices for splits
+# Función para ajustar precios por splits
 def ajustar_precios_por_splits(df, ticker):
     try:
         if ticker == 'AGRO.BA':
-            # Specific split adjustment for AGRO.BA
+            # Ajuste para AGRO.BA
             split_date = datetime(2023, 11, 3)
             df.loc[df['Date'] < split_date, 'Close'] /= 6
             df.loc[df['Date'] == split_date, 'Close'] *= 2.1
         else:
-            divisor = splits.get(ticker, 1)  # Default divisor is 1 if ticker is not in the dictionary
+            divisor = splits.get(ticker, 1)  # Valor por defecto es 1 si no está en el diccionario
             split_threshold_date = datetime(2024, 1, 23)
             df.loc[df['Date'] <= split_threshold_date, 'Close'] /= divisor
     except Exception as e:
-        logger.error(f"Error adjusting splits for {ticker}: {e}")
+        st.error(f"Error ajustando splits para {ticker}: {e}")
     return df
 
-# Function to load CPI data
-@st.cache
-def load_cpi_data():
-    url = 'https://github.com/mau1878/Acciones-del-MERVAL-ajustadas-por-inflaci-n/blob/main/cpi_mom_data.csv?raw=true'
-    cpi_data = pd.read_csv(url, parse_dates=['Date'], index_col='Date')
-    return cpi_data
+# Función para ajustar los precios por inflación
+def ajustar_por_inflacion(df, cpi_df):
+    df['Date'] = pd.to_datetime(df['Date'])
+    cpi_df['Date'] = pd.to_datetime(cpi_df['Date'])
+    
+    df = df.merge(cpi_df[['Date', 'Cumulative_CPI']], on='Date', how='left')
+    
+    # Llenar valores de inflación faltantes con el valor anterior disponible
+    df['Cumulative_CPI'].fillna(method='ffill', inplace=True)
+    
+    # Ajustar precios por la inflación
+    df['Close_ajustado'] = df['Close'] / df['Cumulative_CPI']
+    
+    return df
 
-# Load CPI data
-daily_cpi = load_cpi_data()
+# Cargar datos de ejemplo de precios e inflación (esto sería cargado desde archivos reales)
+@st.cache_data
+def cargar_datos():
+    daily_cpi = pd.read_csv("https://github.com/mau1878/Acciones-del-MERVAL-ajustadas-por-inflaci-n/blob/main/cpi_mom_data.csv")
+    daily_cpi['Date'] = pd.to_datetime(daily_cpi['Date'])
+    return daily_cpi
 
-# Ensure the index of daily_cpi is in datetime.date format
-daily_cpi.index = pd.to_datetime(daily_cpi.index).date
+# Función principal del script
+def main():
+    st.title("Ajuste de Precios de Acciones por Inflación y Splits")
+    
+    # Cargar datos de inflación
+    daily_cpi = cargar_datos()
 
-# Streamlit app interface
-st.title('Ajuste de Precios por Inflación y Splits')
+    # Selección de fechas
+    start_date = st.date_input('Selecciona la fecha de inicio', daily_cpi['Date'].min())
+    end_date = st.date_input('Selecciona la fecha de fin', daily_cpi['Date'].max())
+    start_value = st.number_input('Valor en la fecha de inicio (ARS):', min_value=0.0, value=100.0)
 
-# Input for start and end dates
-start_date = st.date_input('Selecciona la fecha de inicio', daily_cpi.index.min())
-end_date = st.date_input('Selecciona la fecha de fin', daily_cpi.index.max())
+    # Ajuste por inflación
+    try:
+        start_inflation = daily_cpi.loc[daily_cpi['Date'] == pd.to_datetime(start_date), 'Cumulative_CPI'].values[0]
+        end_inflation = daily_cpi.loc[daily_cpi['Date'] == pd.to_datetime(end_date), 'Cumulative_CPI'].values[0]
+        
+        # Calcular el valor ajustado por inflación
+        end_value = start_value * (end_inflation / start_inflation)
+        st.write(f'El valor ajustado por inflación es: {end_value:.2f} ARS')
+    
+    except IndexError:
+        st.error('La fecha seleccionada no está disponible en los datos de inflación.')
+    
+    # Cargar precios de acciones
+    ticker = st.text_input('Ingresa el ticker del activo:', value='AAPL.BA').upper()
 
-# Convert the input dates to datetime.date format for consistency
-start_date = pd.to_datetime(start_date).date()
-end_date = pd.to_datetime(end_date).date()
+    if ticker in splits:
+        # Supongamos que tenemos un DataFrame con datos históricos de precios
+        # Aquí se cargarían datos reales de un archivo CSV o API como yfinance
+        df = pd.DataFrame({
+            'Date': pd.date_range(start='2022-01-01', periods=100, freq='D'),
+            'Close': np.random.uniform(100, 200, size=100)  # Valores ficticios
+        })
+        
+        # Ajustar por splits
+        df = ajustar_precios_por_splits(df, ticker)
+        
+        # Ajustar por inflación
+        df_ajustado = ajustar_por_inflacion(df, daily_cpi)
+        
+        # Graficar
+        fig = px.line(df_ajustado, x='Date', y='Close_ajustado', title=f'Precio ajustado de {ticker} por inflación y splits')
+        st.plotly_chart(fig)
+    else:
+        st.error(f'El ticker {ticker} no se encuentra en la lista de ajustes por splits.')
 
-# Input for start value in ARS
-start_value = st.number_input('Valor en la fecha de inicio (ARS):', min_value=0.0, step=0.01)
-
-# Ensure that the dates exist in the CPI index
-if start_date in daily_cpi.index and end_date in daily_cpi.index:
-    start_inflation = daily_cpi.loc[start_date]
-    end_inflation = daily_cpi.loc[end_date]
-
-    # Adjust the end value for inflation
-    end_value = start_value * (end_inflation / start_inflation)
-    st.write(f'El valor ajustado por inflación es: {end_value:.2f} ARS')
-else:
-    st.error('La fecha seleccionada no está disponible en los datos de inflación.')
-
-# Example data for stocks
-ticker = st.selectbox('Seleccionar ticker:', list(splits.keys()))
-df = pd.DataFrame({
-    'Date': pd.date_range(start='2022-01-01', periods=100),
-    'Close': np.random.rand(100) * 1000  # Random stock prices for example
-})
-
-# Adjust stock prices for splits
-df = ajustar_precios_por_splits(df, ticker)
-
-# Plot the adjusted data
-fig = px.line(df, x='Date', y='Close', title=f'Precio ajustado por splits para {ticker}')
-st.plotly_chart(fig)
+if __name__ == '__main__':
+    main()
