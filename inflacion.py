@@ -121,6 +121,9 @@ plot_start_date = st.date_input(
     key='plot_start_date_input'
 )
 
+# Option to show inflation-adjusted values as percentages
+show_percentage = st.checkbox('Mostrar valores ajustados por inflación como porcentajes', value=False)
+
 if tickers_input:
     tickers = [ticker.strip().upper() for ticker in tickers_input.split(',')]
 
@@ -141,15 +144,23 @@ if tickers_input:
             # Adjust stock prices for inflation
             stock_data['Inflation_Adjusted_Close'] = stock_data['Close'] * (daily_cpi.loc[stock_data.index[-1]] / daily_cpi.loc[stock_data.index])
 
-            # Plot the adjusted stock prices
-            fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['Inflation_Adjusted_Close'],
-                                     mode='lines', name=ticker))
+            if show_percentage:
+                # Calculate inflation-adjusted values as percentages relative to the start value
+                stock_data['Inflation_Adjusted_Percentage'] = (stock_data['Inflation_Adjusted_Close'] / stock_data['Inflation_Adjusted_Close'].iloc[0] - 1) * 100
+                # Plot the inflation-adjusted percentage changes
+                fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['Inflation_Adjusted_Percentage'],
+                                         mode='lines', name=f'{ticker} (%)'))
+            else:
+                # Plot the adjusted stock prices
+                fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['Inflation_Adjusted_Close'],
+                                         mode='lines', name=ticker))
 
-            # Plot the average price as a dotted line
-            avg_price = stock_data['Inflation_Adjusted_Close'].mean()
-            fig.add_trace(go.Scatter(x=stock_data.index, y=[avg_price] * len(stock_data),
-                                     mode='lines', name=f'{ticker} Precio Promedio',
-                                     line=dict(dash='dot')))
+            # Plot the average price as a dotted line (only for absolute values, not percentages)
+            if not show_percentage:
+                avg_price = stock_data['Inflation_Adjusted_Close'].mean()
+                fig.add_trace(go.Scatter(x=stock_data.index, y=[avg_price] * len(stock_data),
+                                         mode='lines', name=f'{ticker} Precio Promedio',
+                                         line=dict(dash='dot')))
 
             # Plot the SMA for the first ticker only
             if i == 0:
@@ -174,6 +185,6 @@ if tickers_input:
     # Update layout for the plot
     fig.update_layout(title='Precios Históricos Ajustados por Inflación con Promedio y SMA',
                       xaxis_title='Fecha',
-                      yaxis_title='Precio de Cierre Ajustado (ARS)')
+                      yaxis_title='Precio de Cierre Ajustado (ARS)' if not show_percentage else 'Variación Porcentual (%)')
 
     st.plotly_chart(fig)
