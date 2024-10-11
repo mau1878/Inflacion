@@ -4,6 +4,7 @@ import yfinance as yf
 import plotly.graph_objs as go
 from datetime import datetime
 import logging
+import re
 
 # Configurar logging
 logging.basicConfig(level=logging.ERROR)
@@ -220,6 +221,9 @@ if tickers_input:
   tickers = [ticker.strip().upper() for ticker in tickers_input.split(',')]
   fig = go.Figure()
 
+  # Mapeo de tickers a nombres de variables
+  ticker_var_map = {ticker: ticker.replace('.', '_') for ticker in tickers}
+
   for i, ticker in enumerate(tickers):
       try:
           # Descargar datos históricos de la acción desde la fecha seleccionada
@@ -245,42 +249,61 @@ if tickers_input:
           # Calcular 'Inflation_Adjusted_Close'
           stock_data['Inflation_Adjusted_Close'] = stock_data['Close'] * (stock_data['Cumulative_Inflation'].iloc[-1] / stock_data['Cumulative_Inflation'])
 
-          # Almacenar los datos procesados en el diccionario
-          stock_data_dict[ticker] = stock_data.copy()
+          # Almacenar los datos procesados en el diccionario con el nombre de variable
+          var_name = ticker_var_map[ticker]
+          stock_data_dict[var_name] = stock_data['Inflation_Adjusted_Close']
 
           if show_percentage:
               # Calcular valores ajustados por inflación como porcentajes relativos al valor inicial
               stock_data['Inflation_Adjusted_Percentage'] = (stock_data['Inflation_Adjusted_Close'] / stock_data['Inflation_Adjusted_Close'].iloc[0] - 1) * 100
               # Graficar los cambios porcentuales ajustados por inflación
-              fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['Inflation_Adjusted_Percentage'],
-                                       mode='lines', name=f'{ticker} (%)'))
+              fig.add_trace(go.Scatter(
+                  x=stock_data.index,
+                  y=stock_data['Inflation_Adjusted_Percentage'],
+                  mode='lines',
+                  name=f'{ticker} (%)'
+              ))
 
               # Añadir una línea horizontal roja en 0%
               fig.add_shape(
                   type="line",
-                  x0=stock_data.index.min(), x1=stock_data.index.max(),
-                  y0=0, y1=0,
+                  x0=stock_data.index.min(),
+                  x1=stock_data.index.max(),
+                  y0=0,
+                  y1=0,
                   line=dict(color="red", width=2, dash="dash"),
                   xref="x",
                   yref="y"
               )
           else:
               # Graficar los precios ajustados por inflación
-              fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['Inflation_Adjusted_Close'],
-                                       mode='lines', name=ticker))
+              fig.add_trace(go.Scatter(
+                  x=stock_data.index,
+                  y=stock_data['Inflation_Adjusted_Close'],
+                  mode='lines',
+                  name=f'{ticker}'
+              ))
 
               # Graficar el precio promedio como una línea punteada
               avg_price = stock_data['Inflation_Adjusted_Close'].mean()
-              fig.add_trace(go.Scatter(x=stock_data.index, y=[avg_price] * len(stock_data),
-                                       mode='lines', name=f'{ticker} Precio Promedio',
-                                       line=dict(dash='dot')))
+              fig.add_trace(go.Scatter(
+                  x=stock_data.index,
+                  y=[avg_price] * len(stock_data),
+                  mode='lines',
+                  name=f'{ticker} Precio Promedio',
+                  line=dict(dash='dot')
+              ))
 
           # Graficar el SMA para el primer ticker solamente
           if i == 0:
               stock_data['SMA'] = stock_data['Inflation_Adjusted_Close'].rolling(window=sma_period).mean()
-              fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['SMA'],
-                                       mode='lines', name=f'{ticker} SMA de {sma_period} Periodos',
-                                       line=dict(color='orange')))
+              fig.add_trace(go.Scatter(
+                  x=stock_data.index,
+                  y=stock_data['SMA'],
+                  mode='lines',
+                  name=f'{ticker} SMA de {sma_period} Periodos',
+                  line=dict(color='orange')
+              ))
 
       except Exception as e:
           st.error(f"Ocurrió un error con el ticker {ticker}: {e}")
@@ -310,52 +333,66 @@ if tickers_input:
 
   if custom_expression:
       try:
-          # Preparar el diccionario local con las Series de los tickers
-          # Reemplazar '.' por '_' en los nombres de los tickers para variables válidas
-          local_dict = {ticker.replace('.', '_'): data['Inflation_Adjusted_Close'] for ticker, data in stock_data_dict.items()}
+          # Reemplazar '.' por '_' en los tickers dentro de la expresión
+          # Ordenar tickers por longitud descendente para evitar reemplazos parciales
+          sorted_tickers = sorted(ticker_var_map.keys(), key=len, reverse=True)
+          transformed_expression = custom_expression
+          for ticker in sorted_tickers:
+              var_name = ticker_var_map[ticker]
+              # Usar regex para reemplazar solo ocurrencias completas del ticker
+              # Evitar reemplazar partes de otros tickers
+              pattern = re.escape(ticker)
+              transformed_expression = re.sub(rf'\b{pattern}\b', var_name, transformed_expression)
 
-          # Reemplazar '.' por '_' en la expresión para coincidir con nombres de variables
-          transformed_expression = custom_expression.replace('.', '_')
-
-          # Crear un DataFrame con todas las series ajustadas
-          adjusted_close_df = pd.DataFrame(stock_data_dict)
-
-          # Reemplazar '.' por '_' en las columnas
-          adjusted_close_df.columns = [col.replace('.', '_') for col in adjusted_close_df.columns]
-
+          # Crear un DataFrame combinado con todas las series ajustadas
+          combined_df = pd.DataFrame(stock_data_dict)
           # Rellenar datos faltantes
-          adjusted_close_df.ffill(inplace=True)
-          adjusted_close_df.bfill(inplace=True)
+          combined_df.ffill(inplace=True)
+          combined_df.bfill(inplace=True)
 
           # Evaluar la expresión usando el DataFrame combinado
-          custom_series = adjusted_close_df.eval(transformed_expression, engine='python')
+          custom_series = combined_df.eval(transformed_expression, engine='python')
 
-          # Nombre para el cálculo personalizado
-          custom_name = f'Custom: {custom_expression}'
+          # Verificar que la serie resultante tenga el mismo índice
+          if isinstance(custom_series, pd.Series):
+              # Nombre para el cálculo personalizado
+              custom_name = f'Custom: {custom_expression}'
 
-          # Graficar la serie personalizada
-          if show_percentage:
-              # Calcular cambios porcentuales
-              custom_series_pct = (custom_series / custom_series.iloc[0] - 1) * 100
-              fig.add_trace(go.Scatter(x=custom_series_pct.index, y=custom_series_pct,
-                                       mode='lines', name=custom_name))
+              # Graficar la serie personalizada
+              if show_percentage:
+                  # Calcular cambios porcentuales
+                  custom_series_pct = (custom_series / custom_series.iloc[0] - 1) * 100
+                  fig.add_trace(go.Scatter(
+                      x=custom_series_pct.index,
+                      y=custom_series_pct,
+                      mode='lines',
+                      name=custom_name
+                  ))
 
-              # Añadir una línea horizontal roja en 0%
-              fig.add_shape(
-                  type="line",
-                  x0=custom_series_pct.index.min(), x1=custom_series_pct.index.max(),
-                  y0=0, y1=0,
-                  line=dict(color="red", width=2, dash="dash"),
-                  xref="x",
-                  yref="y"
-              )
+                  # Añadir una línea horizontal roja en 0%
+                  fig.add_shape(
+                      type="line",
+                      x0=custom_series_pct.index.min(),
+                      x1=custom_series_pct.index.max(),
+                      y0=0,
+                      y1=0,
+                      line=dict(color="red", width=2, dash="dash"),
+                      xref="x",
+                      yref="y"
+                  )
+              else:
+                  fig.add_trace(go.Scatter(
+                      x=custom_series.index,
+                      y=custom_series,
+                      mode='lines',
+                      name=custom_name
+                  ))
           else:
-              fig.add_trace(go.Scatter(x=custom_series.index, y=custom_series,
-                                       mode='lines', name=custom_name))
+              st.error("La expresión personalizada no devolvió una serie válida.")
 
       except Exception as e:
           # Obtener nombres de variables disponibles para asistir en la corrección
-          available_vars = ', '.join([ticker.replace('.', '_') for ticker in stock_data_dict.keys()])
+          available_vars = ', '.join([v for v in ticker_var_map.values()])
           st.error(f"Error al evaluar la expresión personalizada: {e}\n\n**Nombres de variables disponibles:** {available_vars}")
 
   # ------------------------------
