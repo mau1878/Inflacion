@@ -1,60 +1,45 @@
 import streamlit as st
 import pandas as pd
 import yfinance as yf
-import plotly.graph_objs as go
+import plotly.graph_objects as go
 
-# Load the inflation data from the CSV file
-cpi_data = pd.read_csv('inflaciónargentina2.csv')
+# Load CPI data (assuming it has been preloaded or fetched from your file)
+cpi_data_url = 'https://github.com/mau1878/Acciones-del-MERVAL-ajustadas-por-inflaci-n/blob/main/cpi_mom_data.csv'
+cpi_df = pd.read_csv(cpi_data_url, parse_dates=['Date'], index_col='Date')
 
-# Ensure the Date column is in datetime format with the correct format
-cpi_data['Date'] = pd.to_datetime(cpi_data['Date'], format='%d/%m/%Y')
+# Set up cumulative inflation (from newest to oldest)
+cpi_df = cpi_df.sort_index(ascending=False)
+daily_cpi = cpi_df['Cumulative_CPI']
 
-# Set the Date column as the index
-cpi_data.set_index('Date', inplace=True)
+# Set up Streamlit inputs
+st.title('Análisis de Acciones Ajustadas por Inflación')
 
-# Interpolate cumulative inflation directly
-cpi_data['Cumulative_Inflation'] = (1 + cpi_data['CPI_MoM']).cumprod()
-daily_cpi = cpi_data['Cumulative_Inflation'].resample('D').interpolate(method='linear')
+# User inputs for selecting tickers, start date, and SMA period
+tickers_input = st.text_input('Ingresar manualmente tickers adicionales (separados por comas):')
+plot_start_date = st.date_input('Seleccionar fecha de inicio:', value=daily_cpi.index.min().date())
+sma_period = st.number_input('SMA (Media Móvil Simple) en días:', min_value=1, value=30)
 
-# Create a Streamlit app
-st.title('Ajustadora de acciones del Merval por inflación - MTaurus - https://x.com/MTaurus_ok')
-
-# Big title
-st.subheader('Comparación de rendimiento ajustado por inflación')
-
-# User input: enter stock tickers (multiple tickers separated by commas)
-tickers_input = st.text_input(
-    'Ingresa los tickers de acciones separados por comas (por ejemplo, GGAL.BA, CGPA2.BA):',
-    key='tickers_input'
+# Add an option for the user to choose between displaying prices or percentages
+display_choice = st.radio(
+    "¿Cómo quieres mostrar los datos?",
+    ('Precios ajustados por inflación', 'Porcentaje de cambio desde la fecha base')
 )
 
-# User input: select the start date for the data shown in the plot
-plot_start_date = st.date_input(
-    'Selecciona la fecha de inicio para los datos mostrados en el gráfico:',
-    min_value=daily_cpi.index.min().date(),
+# User input: select the "zero-percent" date for percentage change comparison
+zero_percent_date = st.date_input(
+    'Selecciona la fecha que servirá como base del 0% (si elegiste mostrar porcentajes):',
+    min_value=plot_start_date,
     max_value=daily_cpi.index.max().date(),
     value=daily_cpi.index.min().date(),
-    key='plot_start_date_input'
-)
-
-# User input: select the "zero-percent date" to serve as a reference point
-zero_percent_date = st.date_input(
-    'Selecciona la fecha que será considerada como referencia de 0% (fecha base):',
-    min_value=daily_cpi.index.min().date(),
-    max_value=daily_cpi.index.max().date(),
-    value=daily_cpi.index.max().date(),
     key='zero_percent_date_input'
 )
-
-# User input: toggle between showing prices or percentage changes
-show_as_percentage = st.checkbox('Mostrar el rendimiento como porcentaje en vez de precios ajustados')
 
 if tickers_input:
     tickers = [ticker.strip().upper() for ticker in tickers_input.split(',')]
 
     fig = go.Figure()
 
-    for ticker in tickers:
+    for i, ticker in enumerate(tickers):
         try:
             # Fetch historical stock data starting from the user-selected plot start date
             stock_data = yf.download(ticker, start=plot_start_date, end=daily_cpi.index.max().date())
@@ -69,23 +54,28 @@ if tickers_input:
             # Adjust stock prices for inflation
             stock_data['Inflation_Adjusted_Close'] = stock_data['Close'] * (daily_cpi.loc[stock_data.index[-1]] / daily_cpi.loc[stock_data.index])
 
-            # Calculate the price on the zero-percent date for reference
-            zero_percent_price = stock_data.loc[zero_percent_date, 'Inflation_Adjusted_Close']
-
-            if show_as_percentage:
-                # Calculate the percentage change relative to the zero-percent date
-                stock_data['Percentage_Change'] = (stock_data['Inflation_Adjusted_Close'] / zero_percent_price - 1) * 100
-                y_values = stock_data['Percentage_Change']
-                y_label = 'Cambio porcentual respecto a la fecha base (%)'
+            if display_choice == 'Porcentaje de cambio desde la fecha base':
+                # Use the zero-percent date to calculate percentage change
+                zero_percent_value = stock_data.loc[pd.to_datetime(zero_percent_date), 'Inflation_Adjusted_Close']
+                stock_data['Percentage_Change'] = (stock_data['Inflation_Adjusted_Close'] / zero_percent_value - 1) * 100
+                y_data = stock_data['Percentage_Change']
+                y_label = 'Porcentaje de Cambio (%)'
             else:
-                # Use the inflation-adjusted prices directly
-                y_values = stock_data['Inflation_Adjusted_Close']
-                y_label = 'Precio de Cierre Ajustado (ARS)'
+                # Show inflation-adjusted prices
+                y_data = stock_data['Inflation_Adjusted_Close']
+                y_label = 'Precio Ajustado por Inflación (ARS)'
 
-            # Plot the adjusted stock prices or percentage changes
-            fig.add_trace(go.Scatter(x=stock_data.index, y=y_values,
+            # Plot the selected data (either prices or percentage change)
+            fig.add_trace(go.Scatter(x=stock_data.index, y=y_data,
                                      mode='lines', name=ticker))
 
+            # Plot the SMA for the first ticker only
+            if i == 0:
+                stock_data['SMA'] = stock_data['Inflation_Adjusted_Close'].rolling(window=sma_period).mean()
+                fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['SMA'],
+                                         mode='lines', name=f'{ticker} SMA de {sma_period} Periodos',
+                                         line=dict(color='orange')))
+        
         except Exception as e:
             st.error(f"Ocurrió un error con el ticker {ticker}: {e}")
 
@@ -104,4 +94,5 @@ if tickers_input:
                       xaxis_title='Fecha',
                       yaxis_title=y_label)
 
+    # Display the plot
     st.plotly_chart(fig)
