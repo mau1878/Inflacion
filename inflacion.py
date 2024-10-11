@@ -295,7 +295,7 @@ if tickers_input:
       
       **Instrucciones:**
       - Usa los tickers tal como los ingresaste (incluyendo `.BA` si corresponde).
-      - Para los tickers que contienen puntos (`.`), se reemplazarán automáticamente por guiones bajos (`_`) en la evaluación.
+      - Los tickers con puntos (`.`) serán automáticamente reemplazados por guiones bajos (`_`) en la evaluación.
       - Por lo tanto, la expresión anterior se transformará internamente a: `META*(YPFD_BA / YPF)/20`
       - Asegúrate de que todos los tickers utilizados en la expresión estén cargados y escritos correctamente.
       - Puedes usar operadores matemáticos básicos: `+`, `-`, `*`, `/`, `**`, etc.
@@ -317,19 +317,30 @@ if tickers_input:
           # Reemplazar '.' por '_' en la expresión para coincidir con nombres de variables
           transformed_expression = custom_expression.replace('.', '_')
 
-          # Evaluar la expresión usando pandas.eval
-          custom_series = pd.eval(transformed_expression, local_dict=local_dict, engine='python')
+          # Crear un DataFrame con todas las series ajustadas
+          adjusted_close_df = pd.DataFrame(stock_data_dict)
+
+          # Reemplazar '.' por '_' en las columnas
+          adjusted_close_df.columns = [col.replace('.', '_') for col in adjusted_close_df.columns]
+
+          # Rellenar datos faltantes
+          adjusted_close_df.ffill(inplace=True)
+          adjusted_close_df.bfill(inplace=True)
+
+          # Evaluar la expresión usando el DataFrame combinado
+          custom_series = adjusted_close_df.eval(transformed_expression, engine='python')
 
           # Nombre para el cálculo personalizado
           custom_name = f'Custom: {custom_expression}'
 
           # Graficar la serie personalizada
           if show_percentage:
-              # Si se muestran porcentajes, calcular el cambio porcentual relativo al inicio
+              # Calcular cambios porcentuales
               custom_series_pct = (custom_series / custom_series.iloc[0] - 1) * 100
               fig.add_trace(go.Scatter(x=custom_series_pct.index, y=custom_series_pct,
                                        mode='lines', name=custom_name))
-              # Añadir una línea horizontal en 0% si no está presente
+
+              # Añadir una línea horizontal roja en 0%
               fig.add_shape(
                   type="line",
                   x0=custom_series_pct.index.min(), x1=custom_series_pct.index.max(),
@@ -344,7 +355,7 @@ if tickers_input:
 
       except Exception as e:
           # Obtener nombres de variables disponibles para asistir en la corrección
-          available_vars = ', '.join(local_dict.keys())
+          available_vars = ', '.join([ticker.replace('.', '_') for ticker in stock_data_dict.keys()])
           st.error(f"Error al evaluar la expresión personalizada: {e}\n\n**Nombres de variables disponibles:** {available_vars}")
 
   # ------------------------------
