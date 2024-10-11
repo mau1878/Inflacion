@@ -9,33 +9,6 @@ import logging
 logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
-# Cargar datos de inflación desde el archivo CSV
-@st.cache_data
-def load_cpi_data():
-  try:
-      cpi = pd.read_csv('inflaciónargentina2.csv')
-  except FileNotFoundError:
-      st.error("El archivo 'inflaciónargentina2.csv' no se encontró. Asegúrate de que el archivo esté en el mismo directorio que este script.")
-      st.stop()
-      
-  # Asegurar que las columnas necesarias existan
-  if 'Date' not in cpi.columns or 'CPI_MoM' not in cpi.columns:
-      st.error("El archivo CSV debe contener las columnas 'Date' y 'CPI_MoM'.")
-      st.stop()
-      
-  # Convertir la columna 'Date' a datetime
-  cpi['Date'] = pd.to_datetime(cpi['Date'], format='%d/%m/%Y')
-  cpi.set_index('Date', inplace=True)
-  
-  # Calcular la inflación acumulada
-  cpi['Cumulative_Inflation'] = (1 + cpi['CPI_MoM']).cumprod()
-  
-  # Resamplear a diario y rellenar
-  daily = cpi['Cumulative_Inflation'].resample('D').interpolate(method='linear')
-  return daily
-
-daily_cpi = load_cpi_data()
-
 # ------------------------------
 # Diccionario de tickers y sus divisores
 splits = {
@@ -76,24 +49,54 @@ splits = {
 # Función para ajustar precios por splits
 def ajustar_precios_por_splits(df, ticker):
   try:
-      if ticker == 'AGRO.BA' and isinstance(splits[ticker], tuple):
-          # Ajuste para AGRO.BA con múltiples ajustes
-          split_date = datetime(2023, 11, 3)
-          df_before_split = df[df.index < split_date].copy()
-          df_after_split = df[df.index >= split_date].copy()
-          df_before_split['Close'] /= splits[ticker][0]
-          df_after_split['Close'] *= splits[ticker][1]
-          df = pd.concat([df_before_split, df_after_split]).sort_index()
-      else:
-          divisor = splits.get(ticker, 1)  # Valor por defecto es 1 si no está en el diccionario
-          split_threshold_date = datetime(2024, 1, 23)
-          df.loc[df.index <= split_threshold_date, 'Close'] /= divisor
+      if ticker in splits:
+          adjustment = splits[ticker]
+          if isinstance(adjustment, tuple):
+              # Ajuste con múltiples cambios (por ejemplo, AGRO.BA)
+              split_date = datetime(2023, 11, 3)
+              df_before_split = df[df.index < split_date].copy()
+              df_after_split = df[df.index >= split_date].copy()
+              df_before_split['Close'] /= adjustment[0]
+              df_after_split['Close'] *= adjustment[1]
+              df = pd.concat([df_before_split, df_after_split]).sort_index()
+          else:
+              # Ajuste simple de split
+              split_threshold_date = datetime(2024, 1, 23)
+              df.loc[df.index <= split_threshold_date, 'Close'] /= adjustment
+      # Si no hay ajuste, no hacer nada
   except Exception as e:
       logger.error(f"Error ajustando splits para {ticker}: {e}")
   return df
 
 # ------------------------------
+# Cargar datos de inflación desde el archivo CSV
+@st.cache_data
+def load_cpi_data():
+  try:
+      cpi = pd.read_csv('inflaciónargentina2.csv')
+  except FileNotFoundError:
+      st.error("El archivo 'inflaciónargentina2.csv' no se encontró. Asegúrate de que el archivo esté en el mismo directorio que este script.")
+      st.stop()
+      
+  # Asegurar que las columnas necesarias existan
+  if 'Date' not in cpi.columns or 'CPI_MoM' not in cpi.columns:
+      st.error("El archivo CSV debe contener las columnas 'Date' y 'CPI_MoM'.")
+      st.stop()
+      
+  # Convertir la columna 'Date' a datetime
+  cpi['Date'] = pd.to_datetime(cpi['Date'], format='%d/%m/%Y')
+  cpi.set_index('Date', inplace=True)
+  
+  # Calcular la inflación acumulada
+  cpi['Cumulative_Inflation'] = (1 + cpi['CPI_MoM']).cumprod()
+  
+  # Resamplear a diario y rellenar
+  daily = cpi['Cumulative_Inflation'].resample('D').interpolate(method='linear')
+  return daily
 
+daily_cpi = load_cpi_data()
+
+# ------------------------------
 # Crear la aplicación Streamlit
 st.title('Ajustadora de acciones del Merval por inflación - MTaurus - [X: MTaurus_ok](https://x.com/MTaurus_ok)')
 
@@ -215,7 +218,6 @@ stock_data_dict = {}
 
 if tickers_input:
   tickers = [ticker.strip().upper() for ticker in tickers_input.split(',')]
-
   fig = go.Figure()
 
   for i, ticker in enumerate(tickers):
@@ -289,29 +291,34 @@ if tickers_input:
 
   st.markdown("""
       Puedes definir expresiones matemáticas personalizadas utilizando los tickers cargados.
-      **Ejemplo:** `(META * (YPFD / YPF)) / 20`
+      **Ejemplo:** `META*(YPFD.BA / YPF)/20`
       
       **Instrucciones:**
       - Usa los tickers tal como los ingresaste (incluyendo `.BA` si corresponde).
-      - Asegúrate de que todos los tickers utilizados en la expresión estén cargados.
+      - Para los tickers que contienen puntos (`.`), se reemplazarán automáticamente por guiones bajos (`_`) en la evaluación.
+      - Por lo tanto, la expresión anterior se transformará internamente a: `META*(YPFD_BA / YPF)/20`
+      - Asegúrate de que todos los tickers utilizados en la expresión estén cargados y escritos correctamente.
       - Puedes usar operadores matemáticos básicos: `+`, `-`, `*`, `/`, `**`, etc.
       - Puedes usar funciones de `pandas` como `mean()`, `max()`, etc.
   """)
 
   custom_expression = st.text_input(
       'Ingresa una expresión personalizada usando los tickers cargados, operadores matemáticos y funciones:',
-      placeholder='Por ejemplo: (META * (YPFD / YPF)) / 20',
+      placeholder='Por ejemplo: META*(YPFD.BA / YPF)/20',
       key='custom_expression_input'
   )
 
   if custom_expression:
       try:
           # Preparar el diccionario local con las Series de los tickers
-          local_dict = {ticker: data['Inflation_Adjusted_Close'] for ticker, data in stock_data_dict.items()}
+          # Reemplazar '.' por '_' en los nombres de los tickers para variables válidas
+          local_dict = {ticker.replace('.', '_'): data['Inflation_Adjusted_Close'] for ticker, data in stock_data_dict.items()}
+
+          # Reemplazar '.' por '_' en la expresión para coincidir con nombres de variables
+          transformed_expression = custom_expression.replace('.', '_')
 
           # Evaluar la expresión usando pandas.eval
-          # Se establece engine='python' para mayor flexibilidad
-          custom_series = pd.eval(custom_expression, local_dict=local_dict, engine='python')
+          custom_series = pd.eval(transformed_expression, local_dict=local_dict, engine='python')
 
           # Nombre para el cálculo personalizado
           custom_name = f'Custom: {custom_expression}'
