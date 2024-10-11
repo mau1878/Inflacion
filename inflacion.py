@@ -24,156 +24,272 @@ st.subheader('1-Calculadorita pedorra de precios por inflación. Más abajo la d
 
 # User input: choose to enter the value for the start date or end date
 value_choice = st.radio(
-    "¿Quieres ingresar el valor para la fecha de inicio o la fecha de fin?",
-    ('Fecha de Inicio', 'Fecha de Fin'),
-    key='value_choice_radio'
+  "¿Quieres ingresar el valor para la fecha de inicio o la fecha de fin?",
+  ('Fecha de Inicio', 'Fecha de Fin'),
+  key='value_choice_radio'
 )
 
 if value_choice == 'Fecha de Inicio':
-    start_date = st.date_input(
-        'Selecciona la fecha de inicio:',
-        min_value=daily_cpi.index.min().date(),
-        max_value=daily_cpi.index.max().date(),
-        value=daily_cpi.index.min().date(),
-        key='start_date_input'
-    )
-    end_date = st.date_input(
-        'Selecciona la fecha de fin:',
-        min_value=daily_cpi.index.min().date(),
-        max_value=daily_cpi.index.max().date(),
-        value=daily_cpi.index.max().date(),
-        key='end_date_input'
-    )
-    start_value = st.number_input(
-        'Ingresa el valor en la fecha de inicio (en ARS):',
-        min_value=0.0,
-        value=100.0,
-        key='start_value_input'
-    )
+  start_date = st.date_input(
+      'Selecciona la fecha de inicio:',
+      min_value=daily_cpi.index.min().date(),
+      max_value=daily_cpi.index.max().date(),
+      value=daily_cpi.index.min().date(),
+      key='start_date_input'
+  )
+  end_date = st.date_input(
+      'Selecciona la fecha de fin:',
+      min_value=daily_cpi.index.min().date(),
+      max_value=daily_cpi.index.max().date(),
+      value=daily_cpi.index.max().date(),
+      key='end_date_input'
+  )
+  start_value = st.number_input(
+      'Ingresa el valor en la fecha de inicio (en ARS):',
+      min_value=0.0,
+      value=100.0,
+      key='start_value_input'
+  )
 
-    # Filter the data for the selected dates
-    start_inflation = daily_cpi.loc[pd.to_datetime(start_date)]
-    end_inflation = daily_cpi.loc[pd.to_datetime(end_date)]
+  # Filter the data for the selected dates
+  start_inflation = daily_cpi.loc[pd.to_datetime(start_date)]
+  end_inflation = daily_cpi.loc[pd.to_datetime(end_date)]
 
-    # Calculate the adjusted value for the end date
-    end_value = start_value * (end_inflation / start_inflation)
+  # Calculate the adjusted value for the end date
+  end_value = start_value * (end_inflation / start_inflation)
 
-    # Display the results
-    st.write(f"Valor inicial el {start_date}: ARS {start_value}")
-    st.write(f"Valor ajustado el {end_date}: ARS {end_value:.2f}")
+  # Display the results
+  st.write(f"Valor inicial el {start_date}: ARS {start_value}")
+  st.write(f"Valor ajustado el {end_date}: ARS {end_value:.2f}")
 
 else:
-    start_date = st.date_input(
-        'Selecciona la fecha de inicio:',
-        min_value=daily_cpi.index.min().date(),
-        max_value=daily_cpi.index.max().date(),
-        value=daily_cpi.index.min().date(),
-        key='start_date_end_date_input'
-    )
-    end_date = st.date_input(
-        'Selecciona la fecha de fin:',
-        min_value=daily_cpi.index.min().date(),
-        max_value=daily_cpi.index.max().date(),
-        value=daily_cpi.index.max().date(),
-        key='end_date_end_date_input'
-    )
-    end_value = st.number_input(
-        'Ingresa el valor en la fecha de fin (en ARS):',
-        min_value=0.0,
-        value=100.0,
-        key='end_value_input'
-    )
+  start_date = st.date_input(
+      'Selecciona la fecha de inicio:',
+      min_value=daily_cpi.index.min().date(),
+      max_value=daily_cpi.index.max().date(),
+      value=daily_cpi.index.min().date(),
+      key='start_date_end_date_input'
+  )
+  end_date = st.date_input(
+      'Selecciona la fecha de fin:',
+      min_value=daily_cpi.index.min().date(),
+      max_value=daily_cpi.index.max().date(),
+      value=daily_cpi.index.max().date(),
+      key='end_date_end_date_input'
+  )
+  end_value = st.number_input(
+      'Ingresa el valor en la fecha de fin (en ARS):',
+      min_value=0.0,
+      value=100.0,
+      key='end_value_input'
+  )
 
-    # Filter the data for the selected dates
-    start_inflation = daily_cpi.loc[pd.to_datetime(start_date)]
-    end_inflation = daily_cpi.loc[pd.to_datetime(end_date)]
+  # Filter the data for the selected dates
+  start_inflation = daily_cpi.loc[pd.to_datetime(start_date)]
+  end_inflation = daily_cpi.loc[pd.to_datetime(end_date)]
 
-    # Calculate the adjusted value for the start date
-    start_value = end_value / (end_inflation / start_inflation)
+  # Calculate the adjusted value for the start date
+  start_value = end_value / (end_inflation / start_inflation)
 
-    # Display the results
-    st.write(f"Valor ajustado el {start_date}: ARS {start_value:.2f}")
-    st.write(f"Valor final el {end_date}: ARS {end_value}")
+  # Display the results
+  st.write(f"Valor ajustado el {start_date}: ARS {start_value:.2f}")
+  st.write(f"Valor final el {end_date}: ARS {end_value}")
 
 # Big title
 st.subheader('2- Ajustadora de acciones del Merval por inflación - MTaurus - https://x.com/MTaurus_ok')
 
-# User input: enter stock tickers (multiple tickers separated by commas)
-tickers_input = st.text_input(
-    'Ingresa los tickers de acciones separados por comas (por ejemplo, GGAL.BA, CGPA2.BA):',
-    key='tickers_input'
+# Option to select the analysis type
+analysis_type = st.radio(
+  "Selecciona el tipo de análisis que deseas realizar:",
+  ('Análisis Individual', 'Comparación de Rendimiento'),
+  key='analysis_type_radio'
 )
 
-# User input: choose the SMA period for the first ticker
-sma_period = st.number_input(
-    'Ingresa el número de periodos para el SMA del primer ticker:',
-    min_value=1,
-    value=10,
-    key='sma_period_input'
-)
+if analysis_type == 'Análisis Individual':
+  # Existing code for individual analysis
+  # User input: enter stock tickers (multiple tickers separated by commas)
+  tickers_input = st.text_input(
+      'Ingresa los tickers de acciones separados por comas (por ejemplo, GGAL.BA, CGPA2.BA):',
+      key='tickers_input'
+  )
 
-# User input: select the start date for the data shown in the plot
-plot_start_date = st.date_input(
-    'Selecciona la fecha de inicio para los datos mostrados en el gráfico:',
-    min_value=daily_cpi.index.min().date(),
-    max_value=daily_cpi.index.max().date(),
-    value=daily_cpi.index.min().date(),
-    key='plot_start_date_input'
-)
+  # User input: choose the SMA period for the first ticker
+  sma_period = st.number_input(
+      'Ingresa el número de periodos para el SMA del primer ticker:',
+      min_value=1,
+      value=10,
+      key='sma_period_input'
+  )
 
-if tickers_input:
-    tickers = [ticker.strip().upper() for ticker in tickers_input.split(',')]
+  # User input: select the start date for the data shown in the plot
+  plot_start_date = st.date_input(
+      'Selecciona la fecha de inicio para los datos mostrados en el gráfico:',
+      min_value=daily_cpi.index.min().date(),
+      max_value=daily_cpi.index.max().date(),
+      value=daily_cpi.index.min().date(),
+      key='plot_start_date_input'
+  )
 
-    fig = go.Figure()
+  if tickers_input:
+      tickers = [ticker.strip().upper() for ticker in tickers_input.split(',')]
 
-    for i, ticker in enumerate(tickers):
-        try:
-            # Fetch historical stock data starting from the user-selected plot start date
-            stock_data = yf.download(ticker, start=plot_start_date, end=daily_cpi.index.max().date())
-            
-            if stock_data.empty:
-                st.error(f"No se encontraron datos para el ticker {ticker}.")
-                continue
+      fig = go.Figure()
 
-            # Ensure the Date column is in datetime format
-            stock_data.index = pd.to_datetime(stock_data.index)
+      for i, ticker in enumerate(tickers):
+          try:
+              # Fetch historical stock data starting from the user-selected plot start date
+              stock_data = yf.download(ticker, start=plot_start_date, end=daily_cpi.index.max().date())
 
-            # Adjust stock prices for inflation
-            stock_data['Inflation_Adjusted_Close'] = stock_data['Close'] * (daily_cpi.loc[stock_data.index[-1]] / daily_cpi.loc[stock_data.index])
+              if stock_data.empty:
+                  st.error(f"No se encontraron datos para el ticker {ticker}.")
+                  continue
 
-            # Plot the adjusted stock prices
-            fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['Inflation_Adjusted_Close'],
-                                     mode='lines', name=ticker))
+              # Ensure the Date column is in datetime format
+              stock_data.index = pd.to_datetime(stock_data.index)
 
-            # Plot the average price as a dotted line
-            avg_price = stock_data['Inflation_Adjusted_Close'].mean()
-            fig.add_trace(go.Scatter(x=stock_data.index, y=[avg_price] * len(stock_data),
-                                     mode='lines', name=f'{ticker} Precio Promedio',
-                                     line=dict(dash='dot')))
+              # Adjust stock prices for inflation
+              stock_data['Inflation_Adjusted_Close'] = stock_data['Close'] * (daily_cpi.loc[stock_data.index[-1]] / daily_cpi.loc[stock_data.index])
 
-            # Plot the SMA for the first ticker only
-            if i == 0:
-                stock_data['SMA'] = stock_data['Inflation_Adjusted_Close'].rolling(window=sma_period).mean()
-                fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['SMA'],
-                                         mode='lines', name=f'{ticker} SMA de {sma_period} Periodos',
-                                         line=dict(color='orange')))
-        
-        except Exception as e:
-            st.error(f"Ocurrió un error con el ticker {ticker}: {e}")
+              # Plot the adjusted stock prices
+              fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['Inflation_Adjusted_Close'],
+                                       mode='lines', name=ticker))
 
-    # Add a watermark to the plot
-    fig.add_annotation(
-        text="MTaurus - X: mtaurus_ok",
-        xref="paper", yref="paper",
-        x=0.5, y=0.5,
-        showarrow=False,
-        font=dict(size=30, color="rgba(150, 150, 150, 0.3)"),
-        opacity=0.2
-    )
+              # Plot the average price as a dotted line
+              avg_price = stock_data['Inflation_Adjusted_Close'].mean()
+              fig.add_trace(go.Scatter(x=stock_data.index, y=[avg_price] * len(stock_data),
+                                       mode='lines', name=f'{ticker} Precio Promedio',
+                                       line=dict(dash='dot')))
 
-    # Update layout for the plot
-    fig.update_layout(title='Precios Históricos Ajustados por Inflación con Promedio y SMA',
-                      xaxis_title='Fecha',
-                      yaxis_title='Precio de Cierre Ajustado (ARS)')
+              # Plot the SMA for the first ticker only
+              if i == 0:
+                  stock_data['SMA'] = stock_data['Inflation_Adjusted_Close'].rolling(window=sma_period).mean()
+                  fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['SMA'],
+                                           mode='lines', name=f'{ticker} SMA de {sma_period} Periodos',
+                                           line=dict(color='orange')))
 
-    st.plotly_chart(fig)
+          except Exception as e:
+              st.error(f"Ocurrió un error con el ticker {ticker}: {e}")
+
+      # Add a watermark to the plot
+      fig.add_annotation(
+          text="MTaurus - X: mtaurus_ok",
+          xref="paper", yref="paper",
+          x=0.5, y=0.5,
+          showarrow=False,
+          font=dict(size=30, color="rgba(150, 150, 150, 0.3)"),
+          opacity=0.2
+      )
+
+      # Update layout for the plot
+      fig.update_layout(title='Precios Históricos Ajustados por Inflación con Promedio y SMA',
+                        xaxis_title='Fecha',
+                        yaxis_title='Precio de Cierre Ajustado (ARS)')
+
+      st.plotly_chart(fig)
+
+else:
+  # New code for performance comparison
+  st.subheader('Comparación de Rendimiento Ajustado por Inflación')
+
+  # User input: enter stock tickers (multiple tickers separated by commas)
+  tickers_input = st.text_input(
+      'Ingresa los tickers de acciones para comparar, separados por comas (por ejemplo, GGAL.BA, CGPA2.BA):',
+      key='comparison_tickers_input'
+  )
+
+  # User input: select the start date, end date, and zero-percent date
+  comparison_start_date = st.date_input(
+      'Selecciona la fecha de inicio para el período de comparación:',
+      min_value=daily_cpi.index.min().date(),
+      max_value=daily_cpi.index.max().date(),
+      value=(daily_cpi.index.max() - pd.DateOffset(years=1)).date(),
+      key='comparison_start_date_input'
+  )
+
+  comparison_end_date = st.date_input(
+      'Selecciona la fecha de fin para el período de comparación:',
+      min_value=comparison_start_date,
+      max_value=daily_cpi.index.max().date(),
+      value=daily_cpi.index.max().date(),
+      key='comparison_end_date_input'
+  )
+
+  zero_percent_date = st.date_input(
+      'Selecciona la fecha que se considerará como "fecha cero" para el rendimiento:',
+      min_value=comparison_start_date,
+      max_value=comparison_end_date,
+      value=comparison_start_date,
+      key='zero_percent_date_input'
+  )
+
+  if tickers_input:
+      tickers = [ticker.strip().upper() for ticker in tickers_input.split(',')]
+      performance_data = pd.DataFrame()
+
+      for ticker in tickers:
+          try:
+              # Fetch historical stock data for the comparison period
+              stock_data = yf.download(ticker, start=comparison_start_date, end=comparison_end_date)
+
+              if stock_data.empty:
+                  st.error(f"No se encontraron datos para el ticker {ticker}.")
+                  continue
+
+              # Ensure the Date column is in datetime format
+              stock_data.index = pd.to_datetime(stock_data.index)
+
+              # Adjust stock prices for inflation
+              inflation_adjustment = daily_cpi.loc[stock_data.index[-1]] / daily_cpi.loc[stock_data.index]
+              stock_data['Inflation_Adjusted_Close'] = stock_data['Close'] * inflation_adjustment
+
+              # Calculate relative performance based on the zero_percent_date
+              base_price = stock_data.loc[zero_percent_date, 'Inflation_Adjusted_Close']
+              stock_data['Relative_Performance'] = (stock_data['Inflation_Adjusted_Close'] / base_price - 1) * 100
+
+              # Add to performance data DataFrame
+              performance_data[ticker] = stock_data['Relative_Performance']
+
+          except Exception as e:
+              st.error(f"Ocurrió un error con el ticker {ticker}: {e}")
+
+      if not performance_data.empty:
+          # Plot the relative performance
+          fig = go.Figure()
+          for ticker in performance_data.columns:
+              fig.add_trace(go.Scatter(
+                  x=performance_data.index,
+                  y=performance_data[ticker],
+                  mode='lines',
+                  name=ticker
+              ))
+
+          # Add a horizontal line at y=0
+          fig.add_shape(
+              type='line',
+              x0=performance_data.index.min(),
+              y0=0,
+              x1=performance_data.index.max(),
+              y1=0,
+              line=dict(color='black', dash='dash')
+          )
+
+          # Add a watermark to the plot
+          fig.add_annotation(
+              text="MTaurus - X: mtaurus_ok",
+              xref="paper", yref="paper",
+              x=0.5, y=0.5,
+              showarrow=False,
+              font=dict(size=30, color="rgba(150, 150, 150, 0.3)"),
+              opacity=0.2
+          )
+
+          # Update layout for the plot
+          fig.update_layout(
+              title='Comparación de Rendimiento Ajustado por Inflación',
+              xaxis_title='Fecha',
+              yaxis_title='Rendimiento Relativo (%)',
+              legend_title_text='Ticker',
+              hovermode='x unified'
+          )
+
+          st.plotly_chart(fig)
