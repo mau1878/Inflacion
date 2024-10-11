@@ -12,67 +12,58 @@ logger = logging.getLogger(__name__)
 # Cargar datos de inflación desde el archivo CSV
 @st.cache_data
 def load_cpi_data():
-  cpi = pd.read_csv('inflaciónargentina2.csv')
+  try:
+      cpi = pd.read_csv('inflaciónargentina2.csv')
+  except FileNotFoundError:
+      st.error("El archivo 'inflaciónargentina2.csv' no se encontró. Asegúrate de que el archivo esté en el mismo directorio que este script.")
+      st.stop()
+      
+  # Asegurar que la columna 'Date' exista
+  if 'Date' not in cpi.columns or 'CPI_MoM' not in cpi.columns:
+      st.error("El archivo CSV debe contener las columnas 'Date' y 'CPI_MoM'.")
+      st.stop()
+      
+  # Convertir la columna 'Date' a datetime
   cpi['Date'] = pd.to_datetime(cpi['Date'], format='%d/%m/%Y')
   cpi.set_index('Date', inplace=True)
+  
+  # Calcular la inflación acumulada
   cpi['Cumulative_Inflation'] = (1 + cpi['CPI_MoM']).cumprod()
+  
+  # Resamplear a diario y rellenar
   daily = cpi['Cumulative_Inflation'].resample('D').interpolate(method='linear')
   return daily
 
 daily_cpi = load_cpi_data()
 
 # ------------------------------
-# Diccionario de tickers y sus divisores
+# Diccionario de tickers y sus divisores (sin sufijos .BA)
 splits = {
-  'MMM.BA': 2,
-  'ADGO.BA': 1,
-  'ADBE.BA': 2,
-  'AEM.BA': 2,
-  'AMGN.BA': 3,
-  'AAPL.BA': 2,
-  'BAC.BA': 2,
-  'GOLD.BA': 2,
-  'BIOX.BA': 2,
-  'CVX.BA': 2,
-  'LLY.BA': 7,
-  'XOM.BA': 2,
-  'FSLR.BA': 6,
-  'IBM.BA': 3,
-  'JD.BA': 2,
-  'JPM.BA': 3,
-  'MELI.BA': 2,
-  'NFLX.BA': 3,
-  'PEP.BA': 3,
-  'PFE.BA': 2,
-  'PG.BA': 3,
-  'RIO.BA': 2,
-  'SONY.BA': 2,
-  'SBUX.BA': 3,
-  'TXR.BA': 2,
-  'BA.BA': 4,
-  'TM.BA': 3,
-  'VZ.BA': 2,
-  'VIST.BA': 3,
-  'WMT.BA': 3,
-  'AGRO.BA': (6, 2.1)  # Ajustes para AGRO.BA
+  'AGRO': (6, 2.1),  # Ajustes para AGRO, con una fecha específica
+  # Añade aquí otros tickers que requieran ajustes de splits
+  # Por ejemplo:
+  # 'AAPL': 2,  # Si Apple realiza un split 2 por 1
 }
 
 # ------------------------------
 # Función para ajustar precios por splits
 def ajustar_precios_por_splits(df, ticker):
   try:
-      if ticker == 'AGRO.BA' and isinstance(splits[ticker], tuple):
-          # Ajuste para AGRO.BA con múltiples ajustes
-          split_date = datetime(2023, 11, 3)
-          df_before_split = df[df.index < split_date].copy()
-          df_after_split = df[df.index >= split_date].copy()
-          df_before_split['Close'] /= splits[ticker][0]
-          df_after_split['Close'] *= splits[ticker][1]
-          df = pd.concat([df_before_split, df_after_split]).sort_index()
-      else:
-          divisor = splits.get(ticker, 1)  # Valor por defecto es 1 si no está en el diccionario
-          split_threshold_date = datetime(2024, 1, 23)
-          df.loc[df.index <= split_threshold_date, 'Close'] /= divisor
+      if ticker in splits:
+          adjustment = splits[ticker]
+          if isinstance(adjustment, tuple):
+              # Ajuste con múltiples cambios, se debe definir una lógica específica
+              split_date = datetime(2023, 11, 3)
+              df_before_split = df[df.index < split_date].copy()
+              df_after_split = df[df.index >= split_date].copy()
+              df_before_split['Close'] /= adjustment[0]
+              df_after_split['Close'] *= adjustment[1]
+              df = pd.concat([df_before_split, df_after_split]).sort_index()
+          else:
+              # Ajuste simple de split
+              split_threshold_date = datetime(2024, 1, 23)
+              df.loc[df.index <= split_threshold_date, 'Close'] /= adjustment
+      # Si no hay ajuste, no hacer nada
   except Exception as e:
       logger.error(f"Error ajustando splits para {ticker}: {e}")
   return df
@@ -171,7 +162,7 @@ st.subheader('2- Ajustadora de acciones del Merval por inflación - MTaurus - [X
 
 # Entrada del usuario: ingresar tickers de acciones (separados por comas)
 tickers_input = st.text_input(
-  'Ingresa los tickers de acciones separados por comas (por ejemplo, GGAL.BA, CGPA2.BA):',
+  'Ingresa los tickers de acciones separados por comas (por ejemplo, AAPL, MSFT, META):',
   key='tickers_input'
 )
 
@@ -274,31 +265,26 @@ if tickers_input:
 
   st.markdown("""
       Puedes definir expresiones matemáticas personalizadas utilizando los tickers cargados.
-      **Ejemplo:** `(META.BA * (YPFD.BA / YPF.BA)) / 20`
+      **Ejemplo:** `(META * (YPFD / YPF)) / 20`
       
       **Nombres de Variables Disponibles:**
-      - Reemplaza los puntos (`.`) por guiones bajos (`_`).
-      - Por ejemplo, `META.BA` se convierte en `META_BA`, `YPFD.BA` en `YPFD_BA`, etc.
+      - Usa los tickers en mayúsculas y sin sufijos, por ejemplo, `META`, `YPFD`, `YPF`
   """)
 
   custom_expression = st.text_input(
       'Ingresa una expresión personalizada usando los tickers cargados, operadores matemáticos y funciones:',
-      placeholder='Por ejemplo: (META.BA * (YPFD.BA / YPF.BA)) / 20',
+      placeholder='Por ejemplo: (META * (YPFD / YPF)) / 20',
       key='custom_expression_input'
   )
 
   if custom_expression:
       try:
-          # Preparar el diccionario local con las Series de los tickers (reemplazando '.' por '_')
-          local_dict = {ticker.replace('.', '_'): data['Inflation_Adjusted_Close'] for ticker, data in stock_data_dict.items()}
-
-          # Reemplazar los nombres de tickers en la expresión con los nombres de variables válidos
-          expression = custom_expression
-          for ticker in stock_data_dict.keys():
-              expression = expression.replace(ticker, ticker.replace('.', '_'))
+          # Preparar el diccionario local con las Series de los tickers
+          local_dict = {ticker: data['Inflation_Adjusted_Close'] for ticker, data in stock_data_dict.items()}
 
           # Evaluar la expresión usando pandas.eval
-          custom_series = pd.eval(expression, local_dict=local_dict)
+          # Se establece engine='python' para mayor flexibilidad
+          custom_series = pd.eval(custom_expression, local_dict=local_dict, engine='python')
 
           # Nombre para el cálculo personalizado
           custom_name = f'Custom: {custom_expression}'
