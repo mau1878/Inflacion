@@ -409,7 +409,7 @@ if tickers_input:
 
   # Actualizar el diseño del gráfico
   fig.update_layout(
-      title='Precios Históricos Ajustados por Inflación con Promedio y SMA',
+      title='Precios Históricos Ajustados x Inflación',
       xaxis_title='Fecha',
       yaxis_title='Precio de Cierre Ajustado (ARS)' if not show_percentage else 'Variación Porcentual (%)',
       legend=dict(
