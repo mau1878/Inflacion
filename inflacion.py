@@ -5,11 +5,11 @@ import plotly.graph_objs as go
 from datetime import datetime
 import logging
 
-# Configure logging
+# Configurar logging
 logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
-# Load the inflation data from the CSV file
+# Cargar datos de inflación desde el archivo CSV
 @st.cache_data
 def load_cpi_data():
   cpi = pd.read_csv('inflaciónargentina2.csv')
@@ -79,13 +79,13 @@ def ajustar_precios_por_splits(df, ticker):
 
 # ------------------------------
 
-# Create a Streamlit app
+# Crear la aplicación Streamlit
 st.title('Ajustadora de acciones del Merval por inflación - MTaurus - [X: MTaurus_ok](https://x.com/MTaurus_ok)')
 
-# Subheader for the inflation calculator
+# Subheader para el calculador de inflación
 st.subheader('1- Calculadorita pedorra de precios por inflación. Más abajo la de acciones.')
 
-# User input: choose to enter the value for the start date or end date
+# Entrada del usuario: elegir si ingresar el valor para la fecha de inicio o fin
 value_choice = st.radio(
   "¿Quieres ingresar el valor para la fecha de inicio o la fecha de fin?",
   ('Fecha de Inicio', 'Fecha de Fin'),
@@ -114,7 +114,7 @@ if value_choice == 'Fecha de Inicio':
       key='start_value_input'
   )
 
-  # Filter the data for the selected dates
+  # Filtrar los datos para las fechas seleccionadas
   try:
       start_inflation = daily_cpi.loc[pd.to_datetime(start_date)]
       end_inflation = daily_cpi.loc[pd.to_datetime(end_date)]
@@ -122,10 +122,10 @@ if value_choice == 'Fecha de Inicio':
       st.error(f"Error al obtener la inflación para las fechas seleccionadas: {e}")
       st.stop()
 
-  # Calculate the adjusted value for the end date
+  # Calcular el valor ajustado para la fecha de fin
   end_value = start_value * (end_inflation / start_inflation)
 
-  # Display the results
+  # Mostrar los resultados
   st.write(f"Valor inicial el {start_date}: ARS {start_value}")
   st.write(f"Valor ajustado el {end_date}: ARS {end_value:.2f}")
 
@@ -151,7 +151,7 @@ else:
       key='end_value_input'
   )
 
-  # Filter the data for the selected dates
+  # Filtrar los datos para las fechas seleccionadas
   try:
       start_inflation = daily_cpi.loc[pd.to_datetime(start_date)]
       end_inflation = daily_cpi.loc[pd.to_datetime(end_date)]
@@ -159,23 +159,23 @@ else:
       st.error(f"Error al obtener la inflación para las fechas seleccionadas: {e}")
       st.stop()
 
-  # Calculate the adjusted value for the start date
+  # Calcular el valor ajustado para la fecha de inicio
   start_value = end_value / (end_inflation / start_inflation)
 
-  # Display the results
+  # Mostrar los resultados
   st.write(f"Valor ajustado el {start_date}: ARS {start_value:.2f}")
   st.write(f"Valor final el {end_date}: ARS {end_value}")
 
-# Big title
+# Subheader para la ajustadora de acciones
 st.subheader('2- Ajustadora de acciones del Merval por inflación - MTaurus - [X: MTaurus_ok](https://x.com/MTaurus_ok)')
 
-# User input: enter stock tickers (multiple tickers separated by commas)
+# Entrada del usuario: ingresar tickers de acciones (separados por comas)
 tickers_input = st.text_input(
   'Ingresa los tickers de acciones separados por comas (por ejemplo, GGAL.BA, CGPA2.BA):',
   key='tickers_input'
 )
 
-# User input: choose the SMA period for the first ticker
+# Entrada del usuario: elegir el período de SMA para el primer ticker
 sma_period = st.number_input(
   'Ingresa el número de periodos para el SMA del primer ticker:',
   min_value=1,
@@ -183,7 +183,7 @@ sma_period = st.number_input(
   key='sma_period_input'
 )
 
-# User input: select the start date for the data shown in the plot
+# Entrada del usuario: seleccionar la fecha de inicio para los datos mostrados en el gráfico
 plot_start_date = st.date_input(
   'Selecciona la fecha de inicio para los datos mostrados en el gráfico:',
   min_value=daily_cpi.index.min().date(),
@@ -192,10 +192,10 @@ plot_start_date = st.date_input(
   key='plot_start_date_input'
 )
 
-# Option to show inflation-adjusted values as percentages
+# Opción para mostrar los valores ajustados por inflación como porcentajes
 show_percentage = st.checkbox('Mostrar valores ajustados por inflación como porcentajes', value=False)
 
-# Dictionary to store processed stock data
+# Diccionario para almacenar los datos de acciones procesados
 stock_data_dict = {}
 
 if tickers_input:
@@ -205,40 +205,40 @@ if tickers_input:
 
   for i, ticker in enumerate(tickers):
       try:
-          # Fetch historical stock data starting from the user-selected plot start date
+          # Descargar datos históricos de la acción desde la fecha seleccionada
           stock_data = yf.download(ticker, start=plot_start_date, end=daily_cpi.index.max().date())
 
           if stock_data.empty:
               st.error(f"No se encontraron datos para el ticker {ticker}.")
               continue
 
-          # Ensure the Date column is in datetime format
+          # Asegurar que el índice sea de tipo datetime
           stock_data.index = pd.to_datetime(stock_data.index)
 
-          # Adjust stock prices for splits
+          # Ajustar precios por splits
           stock_data = ajustar_precios_por_splits(stock_data, ticker)
 
-          # Adjust stock prices for inflation
-          # Align dates between stock_data and daily_cpi
+          # Ajustar precios por inflación
+          # Alinear fechas entre stock_data y daily_cpi
           stock_data = stock_data.join(daily_cpi, how='left')
-          # Forward fill any missing inflation data
+          # Rellenar hacia adelante cualquier dato de inflación faltante
           stock_data['Cumulative_Inflation'].ffill(inplace=True)
-          # Drop any remaining NaN values
+          # Eliminar cualquier fila restante con NaN en 'Cumulative_Inflation'
           stock_data.dropna(subset=['Cumulative_Inflation'], inplace=True)
-          # Calculate Inflation_Adjusted_Close
+          # Calcular 'Inflation_Adjusted_Close'
           stock_data['Inflation_Adjusted_Close'] = stock_data['Close'] * (stock_data['Cumulative_Inflation'].iloc[-1] / stock_data['Cumulative_Inflation'])
 
-          # Store the processed data in the dictionary
+          # Almacenar los datos procesados en el diccionario
           stock_data_dict[ticker] = stock_data.copy()
 
           if show_percentage:
-              # Calculate inflation-adjusted values as percentages relative to the start value
+              # Calcular valores ajustados por inflación como porcentajes relativos al valor inicial
               stock_data['Inflation_Adjusted_Percentage'] = (stock_data['Inflation_Adjusted_Close'] / stock_data['Inflation_Adjusted_Close'].iloc[0] - 1) * 100
-              # Plot the inflation-adjusted percentage changes
+              # Graficar los cambios porcentuales ajustados por inflación
               fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['Inflation_Adjusted_Percentage'],
                                        mode='lines', name=f'{ticker} (%)'))
 
-              # Add a red horizontal line at 0% to the plot
+              # Añadir una línea horizontal roja en 0%
               fig.add_shape(
                   type="line",
                   x0=stock_data.index.min(), x1=stock_data.index.max(),
@@ -248,17 +248,17 @@ if tickers_input:
                   yref="y"
               )
           else:
-              # Plot the adjusted stock prices
+              # Graficar los precios ajustados por inflación
               fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['Inflation_Adjusted_Close'],
                                        mode='lines', name=ticker))
 
-              # Plot the average price as a dotted line (only for absolute values, not percentages)
+              # Graficar el precio promedio como una línea punteada
               avg_price = stock_data['Inflation_Adjusted_Close'].mean()
               fig.add_trace(go.Scatter(x=stock_data.index, y=[avg_price] * len(stock_data),
                                        mode='lines', name=f'{ticker} Precio Promedio',
                                        line=dict(dash='dot')))
 
-          # Plot the SMA for the first ticker only
+          # Graficar el SMA para el primer ticker solamente
           if i == 0:
               stock_data['SMA'] = stock_data['Inflation_Adjusted_Close'].rolling(window=sma_period).mean()
               fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['SMA'],
@@ -269,12 +269,16 @@ if tickers_input:
           st.error(f"Ocurrió un error con el ticker {ticker}: {e}")
 
   # ------------------------------
-  # Custom Ratios or Calculations
+  # Cálculos o Ratios Personalizados
   st.subheader('3- Cálculos o Ratios Personalizados')
 
   st.markdown("""
       Puedes definir expresiones matemáticas personalizadas utilizando los tickers cargados.
       **Ejemplo:** `(META.BA * (YPFD.BA / YPF.BA)) / 20`
+      
+      **Nombres de Variables Disponibles:**
+      - Reemplaza los puntos (`.`) por guiones bajos (`_`).
+      - Por ejemplo, `META.BA` se convierte en `META_BA`, `YPFD.BA` en `YPFD_BA`, etc.
   """)
 
   custom_expression = st.text_input(
@@ -285,27 +289,27 @@ if tickers_input:
 
   if custom_expression:
       try:
-          # Prepare the local dictionary with ticker Series
+          # Preparar el diccionario local con las Series de los tickers (reemplazando '.' por '_')
           local_dict = {ticker.replace('.', '_'): data['Inflation_Adjusted_Close'] for ticker, data in stock_data_dict.items()}
 
-          # Replace dots with underscores in ticker names for valid variable names
+          # Reemplazar los nombres de tickers en la expresión con los nombres de variables válidos
           expression = custom_expression
           for ticker in stock_data_dict.keys():
               expression = expression.replace(ticker, ticker.replace('.', '_'))
 
-          # Evaluate the expression using pandas.eval
+          # Evaluar la expresión usando pandas.eval
           custom_series = pd.eval(expression, local_dict=local_dict)
 
-          # Name for the custom calculation
+          # Nombre para el cálculo personalizado
           custom_name = f'Custom: {custom_expression}'
 
-          # Plot the custom series
+          # Graficar la serie personalizada
           if show_percentage:
-              # If displaying percentages, calculate percentage change relative to the start
+              # Si se muestran porcentajes, calcular el cambio porcentual relativo al inicio
               custom_series_pct = (custom_series / custom_series.iloc[0] - 1) * 100
               fig.add_trace(go.Scatter(x=custom_series_pct.index, y=custom_series_pct,
                                        mode='lines', name=custom_name))
-              # Add a red horizontal line at 0% if not already present
+              # Añadir una línea horizontal en 0% si no está presente
               fig.add_shape(
                   type="line",
                   x0=custom_series_pct.index.min(), x1=custom_series_pct.index.max(),
@@ -319,11 +323,13 @@ if tickers_input:
                                        mode='lines', name=custom_name))
 
       except Exception as e:
-          st.error(f"Error al evaluar la expresión personalizada: {e}")
+          # Obtener nombres de variables disponibles para asistir en la corrección
+          available_vars = ', '.join(local_dict.keys())
+          st.error(f"Error al evaluar la expresión personalizada: {e}\n\n**Nombres de variables disponibles:** {available_vars}")
 
   # ------------------------------
 
-  # Add a watermark to the plot
+  # Añadir una marca de agua al gráfico
   fig.add_annotation(
       text="MTaurus - X: mtaurus_ok",
       xref="paper", yref="paper",
@@ -333,7 +339,7 @@ if tickers_input:
       opacity=0.2
   )
 
-  # Update layout for the plot
+  # Actualizar el diseño del gráfico
   fig.update_layout(
       title='Precios Históricos Ajustados por Inflación con Promedio y SMA',
       xaxis_title='Fecha',
