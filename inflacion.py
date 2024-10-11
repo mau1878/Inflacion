@@ -150,6 +150,15 @@ if tickers_input:
                 # Plot the inflation-adjusted percentage changes
                 fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['Inflation_Adjusted_Percentage'],
                                          mode='lines', name=f'{ticker} (%)'))
+
+                # Add a red horizontal line at 0% to the plot
+                fig.add_shape(
+                    type="line",
+                    x0=stock_data.index.min(), x1=stock_data.index.max(),
+                    y0=0, y1=0,
+                    line=dict(color="red", width=2, dash="dash"),
+                    name='Cero Porcentaje'
+                )
             else:
                 # Plot the adjusted stock prices
                 fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['Inflation_Adjusted_Close'],
@@ -168,7 +177,7 @@ if tickers_input:
                 fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['SMA'],
                                          mode='lines', name=f'{ticker} SMA de {sma_period} Periodos',
                                          line=dict(color='orange')))
-        
+
         except Exception as e:
             st.error(f"Ocurrió un error con el ticker {ticker}: {e}")
 
