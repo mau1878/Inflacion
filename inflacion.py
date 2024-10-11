@@ -10,17 +10,16 @@ logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
 # Load the inflation data from the CSV file
-cpi_data = pd.read_csv('inflaciónargentina2.csv')
+@st.cache_data
+def load_cpi_data():
+  cpi = pd.read_csv('inflaciónargentina2.csv')
+  cpi['Date'] = pd.to_datetime(cpi['Date'], format='%d/%m/%Y')
+  cpi.set_index('Date', inplace=True)
+  cpi['Cumulative_Inflation'] = (1 + cpi['CPI_MoM']).cumprod()
+  daily = cpi['Cumulative_Inflation'].resample('D').interpolate(method='linear')
+  return daily
 
-# Ensure the Date column is in datetime format with the correct format
-cpi_data['Date'] = pd.to_datetime(cpi_data['Date'], format='%d/%m/%Y')
-
-# Set the Date column as the index
-cpi_data.set_index('Date', inplace=True)
-
-# Interpolate cumulative inflation directly
-cpi_data['Cumulative_Inflation'] = (1 + cpi_data['CPI_MoM']).cumprod()
-daily_cpi = cpi_data['Cumulative_Inflation'].resample('D').interpolate(method='linear')
+daily_cpi = load_cpi_data()
 
 # ------------------------------
 # Diccionario de tickers y sus divisores
@@ -62,12 +61,14 @@ splits = {
 # Función para ajustar precios por splits
 def ajustar_precios_por_splits(df, ticker):
   try:
-      if ticker == 'AGRO.BA':
-          # Ajuste para AGRO.BA
+      if ticker == 'AGRO.BA' and isinstance(splits[ticker], tuple):
+          # Ajuste para AGRO.BA con múltiples ajustes
           split_date = datetime(2023, 11, 3)
-          # Dado que el índice es datetime, usamos .loc con fechas
-          df.loc[df.index < split_date, 'Close'] /= 6
-          df.loc[df.index == split_date, 'Close'] *= 2.1
+          df_before_split = df[df.index < split_date].copy()
+          df_after_split = df[df.index >= split_date].copy()
+          df_before_split['Close'] /= splits[ticker][0]
+          df_after_split['Close'] *= splits[ticker][1]
+          df = pd.concat([df_before_split, df_after_split]).sort_index()
       else:
           divisor = splits.get(ticker, 1)  # Valor por defecto es 1 si no está en el diccionario
           split_threshold_date = datetime(2024, 1, 23)
@@ -79,10 +80,10 @@ def ajustar_precios_por_splits(df, ticker):
 # ------------------------------
 
 # Create a Streamlit app
-st.title('Ajustadora de acciones del Merval por inflación - MTaurus - https://x.com/MTaurus_ok')
+st.title('Ajustadora de acciones del Merval por inflación - MTaurus - [X: MTaurus_ok](https://x.com/MTaurus_ok)')
 
 # Subheader for the inflation calculator
-st.subheader('1-Calculadorita pedorra de precios por inflación. Más abajo la de acciones.')
+st.subheader('1- Calculadorita pedorra de precios por inflación. Más abajo la de acciones.')
 
 # User input: choose to enter the value for the start date or end date
 value_choice = st.radio(
@@ -166,7 +167,7 @@ else:
   st.write(f"Valor final el {end_date}: ARS {end_value}")
 
 # Big title
-st.subheader('2- Ajustadora de acciones del Merval por inflación - MTaurus - https://x.com/MTaurus_ok')
+st.subheader('2- Ajustadora de acciones del Merval por inflación - MTaurus - [X: MTaurus_ok](https://x.com/MTaurus_ok)')
 
 # User input: enter stock tickers (multiple tickers separated by commas)
 tickers_input = st.text_input(
@@ -193,6 +194,9 @@ plot_start_date = st.date_input(
 
 # Option to show inflation-adjusted values as percentages
 show_percentage = st.checkbox('Mostrar valores ajustados por inflación como porcentajes', value=False)
+
+# Dictionary to store processed stock data
+stock_data_dict = {}
 
 if tickers_input:
   tickers = [ticker.strip().upper() for ticker in tickers_input.split(',')]
@@ -221,7 +225,11 @@ if tickers_input:
           stock_data['Cumulative_Inflation'].ffill(inplace=True)
           # Drop any remaining NaN values
           stock_data.dropna(subset=['Cumulative_Inflation'], inplace=True)
+          # Calculate Inflation_Adjusted_Close
           stock_data['Inflation_Adjusted_Close'] = stock_data['Close'] * (stock_data['Cumulative_Inflation'].iloc[-1] / stock_data['Cumulative_Inflation'])
+
+          # Store the processed data in the dictionary
+          stock_data_dict[ticker] = stock_data.copy()
 
           if show_percentage:
               # Calculate inflation-adjusted values as percentages relative to the start value
@@ -259,6 +267,61 @@ if tickers_input:
 
       except Exception as e:
           st.error(f"Ocurrió un error con el ticker {ticker}: {e}")
+
+  # ------------------------------
+  # Custom Ratios or Calculations
+  st.subheader('3- Cálculos o Ratios Personalizados')
+
+  st.markdown("""
+      Puedes definir expresiones matemáticas personalizadas utilizando los tickers cargados.
+      **Ejemplo:** `(META.BA * (YPFD.BA / YPF.BA)) / 20`
+  """)
+
+  custom_expression = st.text_input(
+      'Ingresa una expresión personalizada usando los tickers cargados, operadores matemáticos y funciones:',
+      placeholder='Por ejemplo: (META.BA * (YPFD.BA / YPF.BA)) / 20',
+      key='custom_expression_input'
+  )
+
+  if custom_expression:
+      try:
+          # Prepare the local dictionary with ticker Series
+          local_dict = {ticker.replace('.', '_'): data['Inflation_Adjusted_Close'] for ticker, data in stock_data_dict.items()}
+
+          # Replace dots with underscores in ticker names for valid variable names
+          expression = custom_expression
+          for ticker in stock_data_dict.keys():
+              expression = expression.replace(ticker, ticker.replace('.', '_'))
+
+          # Evaluate the expression using pandas.eval
+          custom_series = pd.eval(expression, local_dict=local_dict)
+
+          # Name for the custom calculation
+          custom_name = f'Custom: {custom_expression}'
+
+          # Plot the custom series
+          if show_percentage:
+              # If displaying percentages, calculate percentage change relative to the start
+              custom_series_pct = (custom_series / custom_series.iloc[0] - 1) * 100
+              fig.add_trace(go.Scatter(x=custom_series_pct.index, y=custom_series_pct,
+                                       mode='lines', name=custom_name))
+              # Add a red horizontal line at 0% if not already present
+              fig.add_shape(
+                  type="line",
+                  x0=custom_series_pct.index.min(), x1=custom_series_pct.index.max(),
+                  y0=0, y1=0,
+                  line=dict(color="red", width=2, dash="dash"),
+                  xref="x",
+                  yref="y"
+              )
+          else:
+              fig.add_trace(go.Scatter(x=custom_series.index, y=custom_series,
+                                       mode='lines', name=custom_name))
+
+      except Exception as e:
+          st.error(f"Error al evaluar la expresión personalizada: {e}")
+
+  # ------------------------------
 
   # Add a watermark to the plot
   fig.add_annotation(
