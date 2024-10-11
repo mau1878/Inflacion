@@ -1,37 +1,124 @@
 import streamlit as st
 import pandas as pd
 import yfinance as yf
-import plotly.graph_objects as go
+import plotly.graph_objs as go
 
-# Load CPI data (assuming it has been preloaded or fetched from your file)
-cpi_data_url = 'https://github.com/mau1878/Acciones-del-MERVAL-ajustadas-por-inflaci-n/blob/main/cpi_mom_data.csv'
-cpi_df = pd.read_csv(cpi_data_url, parse_dates=['Date'], index_col='Date')
+# Load the inflation data from the CSV file
+cpi_data = pd.read_csv('inflaciónargentina2.csv')
 
-# Set up cumulative inflation (from newest to oldest)
-cpi_df = cpi_df.sort_index(ascending=False)
-daily_cpi = cpi_df['Cumulative_CPI']
+# Ensure the Date column is in datetime format with the correct format
+cpi_data['Date'] = pd.to_datetime(cpi_data['Date'], format='%d/%m/%Y')
 
-# Set up Streamlit inputs
-st.title('Análisis de Acciones Ajustadas por Inflación')
+# Set the Date column as the index
+cpi_data.set_index('Date', inplace=True)
 
-# User inputs for selecting tickers, start date, and SMA period
-tickers_input = st.text_input('Ingresar manualmente tickers adicionales (separados por comas):')
-plot_start_date = st.date_input('Seleccionar fecha de inicio:', value=daily_cpi.index.min().date())
-sma_period = st.number_input('SMA (Media Móvil Simple) en días:', min_value=1, value=30)
+# Interpolate cumulative inflation directly
+cpi_data['Cumulative_Inflation'] = (1 + cpi_data['CPI_MoM']).cumprod()
+daily_cpi = cpi_data['Cumulative_Inflation'].resample('D').interpolate(method='linear')
 
-# Add an option for the user to choose between displaying prices or percentages
-display_choice = st.radio(
-    "¿Cómo quieres mostrar los datos?",
-    ('Precios ajustados por inflación', 'Porcentaje de cambio desde la fecha base')
+# Create a Streamlit app
+st.title('Ajustadora de acciones del Merval por inflación - MTaurus - https://x.com/MTaurus_ok')
+
+# Subheader for the inflation calculator
+st.subheader('1-Calculadorita pedorra de precios por inflación. Más abajo la de acciones.')
+
+# User input: choose to enter the value for the start date or end date
+value_choice = st.radio(
+    "¿Quieres ingresar el valor para la fecha de inicio o la fecha de fin?",
+    ('Fecha de Inicio', 'Fecha de Fin'),
+    key='value_choice_radio'
 )
 
-# User input: select the "zero-percent" date for percentage change comparison
-zero_percent_date = st.date_input(
-    'Selecciona la fecha que servirá como base del 0% (si elegiste mostrar porcentajes):',
-    min_value=plot_start_date,
+if value_choice == 'Fecha de Inicio':
+    start_date = st.date_input(
+        'Selecciona la fecha de inicio:',
+        min_value=daily_cpi.index.min().date(),
+        max_value=daily_cpi.index.max().date(),
+        value=daily_cpi.index.min().date(),
+        key='start_date_input'
+    )
+    end_date = st.date_input(
+        'Selecciona la fecha de fin:',
+        min_value=daily_cpi.index.min().date(),
+        max_value=daily_cpi.index.max().date(),
+        value=daily_cpi.index.max().date(),
+        key='end_date_input'
+    )
+    start_value = st.number_input(
+        'Ingresa el valor en la fecha de inicio (en ARS):',
+        min_value=0.0,
+        value=100.0,
+        key='start_value_input'
+    )
+
+    # Filter the data for the selected dates
+    start_inflation = daily_cpi.loc[pd.to_datetime(start_date)]
+    end_inflation = daily_cpi.loc[pd.to_datetime(end_date)]
+
+    # Calculate the adjusted value for the end date
+    end_value = start_value * (end_inflation / start_inflation)
+
+    # Display the results
+    st.write(f"Valor inicial el {start_date}: ARS {start_value}")
+    st.write(f"Valor ajustado el {end_date}: ARS {end_value:.2f}")
+
+else:
+    start_date = st.date_input(
+        'Selecciona la fecha de inicio:',
+        min_value=daily_cpi.index.min().date(),
+        max_value=daily_cpi.index.max().date(),
+        value=daily_cpi.index.min().date(),
+        key='start_date_end_date_input'
+    )
+    end_date = st.date_input(
+        'Selecciona la fecha de fin:',
+        min_value=daily_cpi.index.min().date(),
+        max_value=daily_cpi.index.max().date(),
+        value=daily_cpi.index.max().date(),
+        key='end_date_end_date_input'
+    )
+    end_value = st.number_input(
+        'Ingresa el valor en la fecha de fin (en ARS):',
+        min_value=0.0,
+        value=100.0,
+        key='end_value_input'
+    )
+
+    # Filter the data for the selected dates
+    start_inflation = daily_cpi.loc[pd.to_datetime(start_date)]
+    end_inflation = daily_cpi.loc[pd.to_datetime(end_date)]
+
+    # Calculate the adjusted value for the start date
+    start_value = end_value / (end_inflation / start_inflation)
+
+    # Display the results
+    st.write(f"Valor ajustado el {start_date}: ARS {start_value:.2f}")
+    st.write(f"Valor final el {end_date}: ARS {end_value}")
+
+# Big title
+st.subheader('2- Ajustadora de acciones del Merval por inflación - MTaurus - https://x.com/MTaurus_ok')
+
+# User input: enter stock tickers (multiple tickers separated by commas)
+tickers_input = st.text_input(
+    'Ingresa los tickers de acciones separados por comas (por ejemplo, GGAL.BA, CGPA2.BA):',
+    key='tickers_input'
+)
+
+# User input: choose the SMA period for the first ticker
+sma_period = st.number_input(
+    'Ingresa el número de periodos para el SMA del primer ticker:',
+    min_value=1,
+    value=10,
+    key='sma_period_input'
+)
+
+# User input: select the start date for the data shown in the plot
+plot_start_date = st.date_input(
+    'Selecciona la fecha de inicio para los datos mostrados en el gráfico:',
+    min_value=daily_cpi.index.min().date(),
     max_value=daily_cpi.index.max().date(),
     value=daily_cpi.index.min().date(),
-    key='zero_percent_date_input'
+    key='plot_start_date_input'
 )
 
 if tickers_input:
@@ -54,20 +141,15 @@ if tickers_input:
             # Adjust stock prices for inflation
             stock_data['Inflation_Adjusted_Close'] = stock_data['Close'] * (daily_cpi.loc[stock_data.index[-1]] / daily_cpi.loc[stock_data.index])
 
-            if display_choice == 'Porcentaje de cambio desde la fecha base':
-                # Use the zero-percent date to calculate percentage change
-                zero_percent_value = stock_data.loc[pd.to_datetime(zero_percent_date), 'Inflation_Adjusted_Close']
-                stock_data['Percentage_Change'] = (stock_data['Inflation_Adjusted_Close'] / zero_percent_value - 1) * 100
-                y_data = stock_data['Percentage_Change']
-                y_label = 'Porcentaje de Cambio (%)'
-            else:
-                # Show inflation-adjusted prices
-                y_data = stock_data['Inflation_Adjusted_Close']
-                y_label = 'Precio Ajustado por Inflación (ARS)'
-
-            # Plot the selected data (either prices or percentage change)
-            fig.add_trace(go.Scatter(x=stock_data.index, y=y_data,
+            # Plot the adjusted stock prices
+            fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['Inflation_Adjusted_Close'],
                                      mode='lines', name=ticker))
+
+            # Plot the average price as a dotted line
+            avg_price = stock_data['Inflation_Adjusted_Close'].mean()
+            fig.add_trace(go.Scatter(x=stock_data.index, y=[avg_price] * len(stock_data),
+                                     mode='lines', name=f'{ticker} Precio Promedio',
+                                     line=dict(dash='dot')))
 
             # Plot the SMA for the first ticker only
             if i == 0:
@@ -90,9 +172,8 @@ if tickers_input:
     )
 
     # Update layout for the plot
-    fig.update_layout(title='Comparación de rendimiento ajustado por inflación',
+    fig.update_layout(title='Precios Históricos Ajustados por Inflación con Promedio y SMA',
                       xaxis_title='Fecha',
-                      yaxis_title=y_label)
+                      yaxis_title='Precio de Cierre Ajustado (ARS)')
 
-    # Display the plot
     st.plotly_chart(fig)
