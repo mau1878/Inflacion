@@ -73,7 +73,7 @@ def ajustar_por_inflacion(df, cpi_df):
 # Cargar datos de ejemplo de precios e inflación (esto sería cargado desde archivos reales)
 @st.cache_data
 def cargar_datos():
-    daily_cpi = pd.read_csv("https://github.com/mau1878/Acciones-del-MERVAL-ajustadas-por-inflaci-n/blob/main/cpi_mom_data.csv")
+    daily_cpi = pd.read_csv("https://raw.githubusercontent.com/mau1878/Acciones-del-MERVAL-ajustadas-por-inflaci-n/main/cpi_mom_data.csv")
     daily_cpi['Date'] = pd.to_datetime(daily_cpi['Date'])
     return daily_cpi
 
