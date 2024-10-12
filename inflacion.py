@@ -264,7 +264,8 @@ if tickers_input:
                   x=stock_data.index,
                   y=stock_data['Inflation_Adjusted_Percentage'],
                   mode='lines',
-                  name=f'{ticker} (%)'
+                  name=f'{ticker} (%)',
+                  yaxis='y1'
               ))
 
               # Añadir una línea horizontal roja en 0%
@@ -276,7 +277,7 @@ if tickers_input:
                   y1=0,
                   line=dict(color="red", width=2, dash="dash"),
                   xref="x",
-                  yref="y"
+                  yref="y1"
               )
           else:
               # Graficar los precios ajustados por inflación
@@ -284,7 +285,8 @@ if tickers_input:
                   x=stock_data.index,
                   y=stock_data['Inflation_Adjusted_Close'],
                   mode='lines',
-                  name=f'{ticker}'
+                  name=f'{ticker}',
+                  yaxis='y1'
               ))
 
               # Graficar el precio promedio como una línea punteada
@@ -294,7 +296,8 @@ if tickers_input:
                   y=[avg_price] * len(stock_data),
                   mode='lines',
                   name=f'{ticker} Precio Promedio',
-                  line=dict(dash='dot')
+                  line=dict(dash='dot'),
+                  yaxis='y1'
               ))
 
           # Graficar el SMA para el primer ticker solamente
@@ -305,7 +308,8 @@ if tickers_input:
                   y=stock_data['SMA'],
                   mode='lines',
                   name=f'{ticker} SMA de {sma_period} Periodos',
-                  line=dict(color='orange')
+                  line=dict(color='orange'),
+                  yaxis='y1'
               ))
 
       except Exception as e:
@@ -375,7 +379,8 @@ if tickers_input:
                   x=custom_series_pct.index,
                   y=custom_series_pct,
                   mode='lines',
-                  name=f'Custom: {custom_expression} (%)'
+                  name=f'Custom: {custom_expression} (%)',
+                  yaxis='y1'
               ))
 
               # Añadir una línea horizontal roja en 0%
@@ -387,14 +392,15 @@ if tickers_input:
                   y1=0,
                   line=dict(color="red", width=2, dash="dash"),
                   xref="x",
-                  yref="y"
+                  yref="y1"
               )
           else:
               fig.add_trace(go.Scatter(
                   x=custom_series_nominal.index,
                   y=custom_series_nominal['Inflation_Adjusted_Custom'],
                   mode='lines',
-                  name=f'Custom: {custom_expression}'
+                  name=f'Custom: {custom_expression}',
+                  yaxis='y1'
               ))
 
           # Almacenar la serie ajustada en el diccionario para posibles usos futuros
@@ -417,11 +423,17 @@ if tickers_input:
       opacity=0.2
   )
 
+  # Configurar el eje secundario si es necesario (más adelante solo para secciones específicas)
+
   # Actualizar el diseño del gráfico
   fig.update_layout(
       title='Precios Históricos Ajustados por Inflación',
       xaxis_title='Fecha',
-      yaxis_title='Precio de Cierre Ajustado (ARS)' if not show_percentage else 'Variación Porcentual (%)',
+      yaxis=dict(
+          title='Precio de Cierre Ajustado (ARS)',
+          titlefont=dict(color='#1f77b4'),
+          tickfont=dict(color='#1f77b4')
+      ),
       legend=dict(
           orientation="h",
           yanchor="bottom",
@@ -460,6 +472,14 @@ vol_comparison_end_date = st.date_input(
   key='vol_comparison_end_date_input'
 )
 
+# Entrada del usuario: seleccionar el número de periodos para calcular la volatilidad histórica
+volatility_window = st.number_input(
+  'Selecciona el número de periodos para calcular la volatilidad histórica:',
+  min_value=1,
+  value=20,
+  key='volatility_window_input'
+)
+
 if selected_ticker:
   try:
       # Descargar datos históricos nominales para el ticker seleccionado
@@ -481,43 +501,36 @@ if selected_ticker:
           # Calcular Precio Ajustado por Inflación
           stock_data['Inflation_Adjusted_Close'] = stock_data['Close'] * (stock_data['Cumulative_Inflation'].iloc[-1] / stock_data['Cumulative_Inflation'])
 
-          # Calcular Retornos Diarios Nominales y Ajustados por Inflación
-          stock_data['Return_Nominal'] = stock_data['Close'].pct_change()
+          # Calcular Retornos Diarios Ajustados por Inflación
           stock_data['Return_Adjusted'] = stock_data['Inflation_Adjusted_Close'].pct_change()
 
-          # Calcular Volatilidad Histórica (Desviación Estándar de los Retornos)
-          volatility_nominal = stock_data['Return_Nominal'].std() * (252**0.5)  # Anualizada
-          volatility_adjusted = stock_data['Return_Adjusted'].std() * (252**0.5)  # Anualizada
+          # Calcular Volatilidad Histórica (Desviación Estándar de los Retornos) sobre la ventana seleccionada
+          stock_data['Volatility_Adjusted'] = stock_data['Return_Adjusted'].rolling(window=volatility_window).std() * (252**0.5)  # Anualizada
 
           # Mostrar Volatilidades
-          st.write(f"**Volatilidad Histórica Nominal:** {volatility_nominal:.2%}")
-          st.write(f"**Volatilidad Histórica Ajustada por Inflación:** {volatility_adjusted:.2%}")
+          latest_volatility = stock_data['Volatility_Adjusted'].dropna().iloc[-1]
+          st.write(f"**Volatilidad Histórica Ajustada por Inflación (ventana {volatility_window}):** {latest_volatility:.2%}")
 
-          # Graficar Precio Ajustado por Inflación
+          # Graficar Precio Ajustado por Inflación y Volatilidad en el mismo gráfico con ejes Y duales
           fig_vol = go.Figure()
 
+          # Trazar Precio Ajustado por Inflación en y1
           fig_vol.add_trace(go.Scatter(
               x=stock_data.index,
               y=stock_data['Inflation_Adjusted_Close'],
               mode='lines',
-              name=f'{selected_ticker} Precio Ajustado por Inflación'
+              name=f'{selected_ticker} Precio Ajustado por Inflación',
+              yaxis='y1'
           ))
 
-          # Graficar Volatilidad como una línea horizontal
-          mean_adjusted_price = stock_data['Inflation_Adjusted_Close'].mean()
-          volatility_line = volatility_adjusted * mean_adjusted_price
-
-          fig_vol.add_shape(
-              type="line",
-              x0=stock_data.index.min(),
-              x1=stock_data.index.max(),
-              y0=volatility_line,
-              y1=volatility_line,
-              line=dict(color="green", width=2, dash="dash"),
-              xref="x",
-              yref="y",
-              name="Volatilidad Ajustada"
-          )
+          # Trazar Volatilidad Ajustada por Inflación en y2
+          fig_vol.add_trace(go.Scatter(
+              x=stock_data.index,
+              y=stock_data['Volatility_Adjusted'],
+              mode='lines',
+              name=f'{selected_ticker} Volatilidad Histórica Ajustada',
+              yaxis='y2'
+          ))
 
           # Añadir una marca de agua al gráfico
           fig_vol.add_annotation(
@@ -529,11 +542,24 @@ if selected_ticker:
               opacity=0.2
           )
 
-          # Actualizar diseño del gráfico
+          # Actualizar el diseño del gráfico para incluir dos ejes Y
           fig_vol.update_layout(
               title=f'Precio Ajustado por Inflación y Volatilidad Histórica de {selected_ticker}',
               xaxis_title='Fecha',
-              yaxis_title='Precio de Cierre Ajustado por Inflación (ARS)',
+              yaxis=dict(
+                  title='Precio de Cierre Ajustado por Inflación (ARS)',
+                  titlefont=dict(color='#1f77b4'),
+                  tickfont=dict(color='#1f77b4'),
+                  anchor='x',
+                  side='left'
+              ),
+              yaxis2=dict(
+                  title='Volatilidad Histórica Ajustada (Anualizada)',
+                  titlefont=dict(color='#ff7f0e'),
+                  tickfont=dict(color='#ff7f0e'),
+                  overlaying='y',
+                  side='right'
+              ),
               legend=dict(
                   orientation="h",
                   yanchor="bottom",
