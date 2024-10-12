@@ -1,19 +1,18 @@
 import streamlit as st
+from datetime import datetime, timedelta
 import pandas as pd
 import yfinance as yf
 import plotly.graph_objs as go
-from datetime import datetime, timedelta
 import numpy as np
-
-# Importing the split adjustment function
-# Ensure that the 'inflacion' module does NOT contain any Streamlit commands at the top level
-from inflacion import ajustar_precios_por_splits  # Ensure this module is available and clean
 
 # **Important:** `st.set_page_config` must be the first Streamlit command
 st.set_page_config(
   page_title="Proyección de CEDEARs Ajustados por Inflación",
   layout="wide"
 )
+
+# Now import modules that should not execute Streamlit commands at import time
+from inflacion import ajustar_precios_por_splits  # Ensure this module is clean
 
 # Title of the app
 st.title("Proyección del rendimiento de CEDEARs ajustados por inflación")
@@ -158,19 +157,20 @@ else:
   st.error(f"No se encontró un ratio para {ticker_lookup}.")
   st.stop()
 
-# Fetch the current exchange rate using YPF.BA and YPF
+# **Corrected Ticker for YPF: Replace 'YPF.BA' with 'YPFD.BA'**
+# Fetch the current exchange rate using YPFD.BA and YPF
 with st.spinner("Calculando la tasa de cambio actual..."):
-  ypf_ba_data = get_stock_data('YPF.BA', start_date, end_date)
+  ypf_ba_data = get_stock_data('YPFD.BA', start_date, end_date)  # Corrected Ticker
   ypf_data = get_stock_data('YPF', start_date, end_date)
 
   if ypf_ba_data is None or ypf_data is None:
-      st.error("No se encontraron datos para YPF.BA o YPF en el rango de fechas seleccionado.")
+      st.error("No se encontraron datos para YPFD.BA o YPF en el rango de fechas seleccionado.")
       st.stop()
 
   # Ensure there are overlapping dates
   common_dates = ypf_ba_data.index.intersection(ypf_data.index)
   if common_dates.empty:
-      st.error("No hay fechas coincidentes entre YPF.BA y YPF para calcular la tasa de cambio.")
+      st.error("No hay fechas coincidentes entre YPFD.BA y YPF para calcular la tasa de cambio.")
       st.stop()
 
   current_exchange_rate = ypf_ba_data.loc[common_dates].iloc[-1] / ypf_data.loc[common_dates].iloc[-1]
