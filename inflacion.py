@@ -102,7 +102,7 @@ daily_cpi = load_cpi_data()
 st.title('Ajustadora de acciones del Merval por inflación - MTaurus - [X: MTaurus_ok](https://x.com/MTaurus_ok)')
 
 # Subheader para el calculador de inflación
-st.subheader('1- Calculadorita pedorra de precios por inflación. Más abajo la de acciones.')
+st.subheader('1- Calculador de precios por inflación')
 
 # Entrada del usuario: elegir si ingresar el valor para la fecha de inicio o fin
 value_choice = st.radio(
@@ -186,7 +186,7 @@ else:
   st.write(f"Valor final el {end_date}: ARS {end_value}")
 
 # Subheader para la ajustadora de acciones
-st.subheader('2- Ajustadora de acciones del Merval por inflación - MTaurus - [X: MTaurus_ok](https://x.com/MTaurus_ok)')
+st.subheader('2- Ajustadora de acciones por inflación')
 
 # Entrada del usuario: ingresar tickers de acciones (separados por comas)
 tickers_input = st.text_input(
@@ -238,18 +238,23 @@ if tickers_input:
           # Asegurar que el índice sea de tipo datetime
           stock_data.index = pd.to_datetime(stock_data.index)
 
-          # Ajustar precios por splits
+          # Ajustar precios por splits (solo si está en el diccionario)
           stock_data = ajustar_precios_por_splits(stock_data, ticker)
 
-          # Unir con los datos de inflación
-          stock_data = stock_data.join(daily_cpi, how='left')
-          # Rellenar hacia adelante cualquier dato de inflación faltante
-          stock_data['Cumulative_Inflation'].ffill(inplace=True)
-          # Eliminar cualquier fila restante con NaN en 'Cumulative_Inflation'
-          stock_data.dropna(subset=['Cumulative_Inflation'], inplace=True)
+          # Verificar si el ticker termina con '.BA' para ajustar por inflación
+          if ticker.endswith('.BA'):
+              # Unir con los datos de inflación
+              stock_data = stock_data.join(daily_cpi, how='left')
+              # Rellenar hacia adelante cualquier dato de inflación faltante
+              stock_data['Cumulative_Inflation'].ffill(inplace=True)
+              # Eliminar cualquier fila restante con NaN en 'Cumulative_Inflation'
+              stock_data.dropna(subset=['Cumulative_Inflation'], inplace=True)
 
-          # Calcular 'Inflation_Adjusted_Close'
-          stock_data['Inflation_Adjusted_Close'] = stock_data['Close'] * (stock_data['Cumulative_Inflation'].iloc[-1] / stock_data['Cumulative_Inflation'])
+              # Calcular 'Inflation_Adjusted_Close'
+              stock_data['Inflation_Adjusted_Close'] = stock_data['Close'] * (stock_data['Cumulative_Inflation'].iloc[-1] / stock_data['Cumulative_Inflation'])
+          else:
+              # No ajustar por inflación
+              stock_data['Inflation_Adjusted_Close'] = stock_data['Close']
 
           # Almacenar los datos en los diccionarios
           var_name = ticker_var_map[ticker]
@@ -347,7 +352,6 @@ if tickers_input:
           for ticker in sorted_tickers:
               var_name = ticker_var_map[ticker]
               # Usar regex para reemplazar solo ocurrencias completas del ticker
-              # Evitar reemplazar partes de otros tickers
               pattern = re.escape(ticker)
               transformed_expression = re.sub(rf'\b{pattern}\b', var_name, transformed_expression)
 
@@ -360,21 +364,28 @@ if tickers_input:
           # Evaluar la expresión usando el DataFrame combinado nominal
           custom_series_nominal = combined_nominal_df.eval(transformed_expression, engine='python')
 
-          # Ajustar el resultado de la expresión por inflación
-          # Unir con los datos de inflación
+          # Crear un DataFrame para la expresión personalizada
           custom_series_nominal = custom_series_nominal.to_frame(name='Custom_Nominal')
-          custom_series_nominal = custom_series_nominal.join(daily_cpi, how='left')
-          # Rellenar hacia adelante cualquier dato de inflación faltante
-          custom_series_nominal['Cumulative_Inflation'].ffill(inplace=True)
-          # Eliminar cualquier fila restante con NaN en 'Cumulative_Inflation'
-          custom_series_nominal.dropna(subset=['Cumulative_Inflation'], inplace=True)
-          # Calcular 'Inflation_Adjusted_Custom'
-          custom_series_nominal['Inflation_Adjusted_Custom'] = custom_series_nominal['Custom_Nominal'] * (custom_series_nominal['Cumulative_Inflation'].iloc[-1] / custom_series_nominal['Cumulative_Inflation'])
+
+          # Determinar si el resultado de la expresión termina con '.BA'
+          # Si es así, ajustar por inflación; de lo contrario, no
+          expression_inflation = custom_expression.strip().split('(')[0].upper().endswith('.BA')
+
+          if expression_inflation:
+              # Ajustar por inflación
+              custom_series_nominal = custom_series_nominal.join(daily_cpi, how='left')
+              custom_series_nominal['Cumulative_Inflation'].ffill(inplace=True)
+              custom_series_nominal.dropna(subset=['Cumulative_Inflation'], inplace=True)
+              custom_series_nominal['Inflation_Adjusted_Custom'] = custom_series_nominal['Custom_Nominal'] * (custom_series_nominal['Cumulative_Inflation'].iloc[-1] / custom_series_nominal['Cumulative_Inflation'])
+              adjusted_series = custom_series_nominal['Inflation_Adjusted_Custom']
+          else:
+              # No ajustar por inflación
+              adjusted_series = custom_series_nominal['Custom_Nominal']
 
           # Agregar la serie ajustada al gráfico
           if show_percentage:
               # Calcular cambios porcentuales
-              custom_series_pct = (custom_series_nominal['Inflation_Adjusted_Custom'] / custom_series_nominal['Inflation_Adjusted_Custom'].iloc[0] - 1) * 100
+              custom_series_pct = (adjusted_series / adjusted_series.iloc[0] - 1) * 100
               fig.add_trace(go.Scatter(
                   x=custom_series_pct.index,
                   y=custom_series_pct,
@@ -396,15 +407,15 @@ if tickers_input:
               )
           else:
               fig.add_trace(go.Scatter(
-                  x=custom_series_nominal.index,
-                  y=custom_series_nominal['Inflation_Adjusted_Custom'],
+                  x=adjusted_series.index,
+                  y=adjusted_series,
                   mode='lines',
                   name=f'Custom: {custom_expression}',
                   yaxis='y1'
               ))
 
           # Almacenar la serie ajustada en el diccionario para posibles usos futuros
-          stock_data_dict_adjusted['Custom_Adjusted'] = custom_series_nominal['Inflation_Adjusted_Custom']
+          stock_data_dict_adjusted['Custom_Adjusted'] = adjusted_series
 
       except Exception as e:
           # Obtener nombres de variables disponibles para asistir en la corrección
@@ -423,25 +434,45 @@ if tickers_input:
       opacity=0.2
   )
 
-  # Configurar el eje secundario si es necesario (más adelante solo para secciones específicas)
-
-  # Actualizar el diseño del gráfico
-  fig.update_layout(
-      title='Precios Históricos Ajustados por Inflación',
-      xaxis_title='Fecha',
-      yaxis=dict(
-          title='Precio de Cierre Ajustado (ARS)',
-          titlefont=dict(color='#1f77b4'),
-          tickfont=dict(color='#1f77b4')
-      ),
-      legend=dict(
-          orientation="h",
-          yanchor="bottom",
-          y=1.02,
-          xanchor="right",
-          x=1
+  # Configurar los ejes y actualizar el diseño del gráfico
+  if show_percentage:
+      # Solo un eje Y
+      fig.update_layout(
+          title='Precios Históricos Ajustados por Inflación (%)',
+          xaxis_title='Fecha',
+          yaxis_title='Variación Porcentual (%)',
+          yaxis=dict(
+              title='Variación Porcentual (%)',
+              titlefont=dict(color='#1f77b4'),
+              tickfont=dict(color='#1f77b4')
+          ),
+          legend=dict(
+              orientation="h",
+              yanchor="bottom",
+              y=1.02,
+              xanchor="right",
+              x=1
+          )
       )
-  )
+  else:
+      # Solo un eje Y
+      fig.update_layout(
+          title='Precios Históricos Ajustados por Inflación',
+          xaxis_title='Fecha',
+          yaxis_title='Precio de Cierre Ajustado (ARS)',
+          yaxis=dict(
+              title='Precio de Cierre Ajustado (ARS)',
+              titlefont=dict(color='#1f77b4'),
+              tickfont=dict(color='#1f77b4')
+          ),
+          legend=dict(
+              orientation="h",
+              yanchor="bottom",
+              y=1.02,
+              xanchor="right",
+              x=1
+          )
+      )
 
   st.plotly_chart(fig)
 
@@ -450,10 +481,10 @@ if tickers_input:
 st.subheader('4- Comparación de Volatilidad Histórica Ajustada por Inflación y Precio Ajustado por Inflación')
 
 # Entrada del usuario: seleccionar un ticker para la comparación
-selected_ticker = st.selectbox(
-  'Selecciona una acción para analizar:',
-  options=[ticker.upper() for ticker in splits.keys()],
-  key='selected_ticker_selectbox'
+selected_ticker = st.text_input(
+  'Ingresa una acción para analizar la volatilidad histórica (puede ser cualquier ticker):',
+  placeholder='Por ejemplo: AAPL, AAPL.BA',
+  key='selected_ticker_input'
 )
 
 # Entrada del usuario: seleccionar el período de tiempo para la comparación
@@ -481,37 +512,43 @@ volatility_window = st.number_input(
 )
 
 if selected_ticker:
+  ticker = selected_ticker.strip().upper()
   try:
-      # Descargar datos históricos nominales para el ticker seleccionado
-      stock_data = yf.download(selected_ticker, start=vol_comparison_start_date, end=vol_comparison_end_date)
+      # Descargar datos históricos para el ticker seleccionado
+      stock_data = yf.download(ticker, start=vol_comparison_start_date, end=vol_comparison_end_date)
 
       if stock_data.empty:
-          st.error(f"No se encontraron datos para el ticker {selected_ticker}.")
+          st.error(f"No se encontraron datos para el ticker {ticker}.")
       else:
-          # Ajustar precios por splits
-          stock_data = ajustar_precios_por_splits(stock_data, selected_ticker)
+          # Ajustar precios por splits si está en el diccionario
+          stock_data = ajustar_precios_por_splits(stock_data, ticker)
 
-          # Unir con los datos de inflación
-          stock_data = stock_data.join(daily_cpi, how='left')
-          # Rellenar hacia adelante cualquier dato de inflación faltante
-          stock_data['Cumulative_Inflation'].ffill(inplace=True)
-          # Eliminar cualquier fila restante con NaN en 'Cumulative_Inflation'
-          stock_data.dropna(subset=['Cumulative_Inflation'], inplace=True)
+          # Verificar si el ticker termina con '.BA' para ajustar por inflación
+          if ticker.endswith('.BA'):
+              # Unir con los datos de inflación
+              stock_data = stock_data.join(daily_cpi, how='left')
+              # Rellenar hacia adelante cualquier dato de inflación faltante
+              stock_data['Cumulative_Inflation'].ffill(inplace=True)
+              # Eliminar cualquier fila restante con NaN en 'Cumulative_Inflation'
+              stock_data.dropna(subset=['Cumulative_Inflation'], inplace=True)
 
-          # Calcular Precio Ajustado por Inflación
-          stock_data['Inflation_Adjusted_Close'] = stock_data['Close'] * (stock_data['Cumulative_Inflation'].iloc[-1] / stock_data['Cumulative_Inflation'])
+              # Calcular Precio Ajustado por Inflación
+              stock_data['Inflation_Adjusted_Close'] = stock_data['Close'] * (stock_data['Cumulative_Inflation'].iloc[-1] / stock_data['Cumulative_Inflation'])
+          else:
+              # No ajustar por inflación
+              stock_data['Inflation_Adjusted_Close'] = stock_data['Close']
 
           # Calcular Retornos Diarios Ajustados por Inflación
           stock_data['Return_Adjusted'] = stock_data['Inflation_Adjusted_Close'].pct_change()
 
-          # Calcular Volatilidad Histórica (Desviación Estándar de los Retornos) sobre la ventana seleccionada
+          # Calcular Volatilidad Histórica Ajustada por Inflación sobre la ventana seleccionada
           stock_data['Volatility_Adjusted'] = stock_data['Return_Adjusted'].rolling(window=volatility_window).std() * (252**0.5)  # Anualizada
 
           # Mostrar Volatilidades
           latest_volatility = stock_data['Volatility_Adjusted'].dropna().iloc[-1]
           st.write(f"**Volatilidad Histórica Ajustada por Inflación (ventana {volatility_window}):** {latest_volatility:.2%}")
 
-          # Graficar Precio Ajustado por Inflación y Volatilidad en el mismo gráfico con ejes Y duales
+          # Crear el gráfico con dos ejes Y
           fig_vol = go.Figure()
 
           # Trazar Precio Ajustado por Inflación en y1
@@ -519,16 +556,16 @@ if selected_ticker:
               x=stock_data.index,
               y=stock_data['Inflation_Adjusted_Close'],
               mode='lines',
-              name=f'{selected_ticker} Precio Ajustado por Inflación',
+              name=f'{ticker} Precio Ajustado por Inflación',
               yaxis='y1'
           ))
 
-          # Trazar Volatilidad Ajustada por Inflación en y2
+          # Trazar Volatilidad Histórica Ajustada por Inflación en y2
           fig_vol.add_trace(go.Scatter(
               x=stock_data.index,
               y=stock_data['Volatility_Adjusted'],
               mode='lines',
-              name=f'{selected_ticker} Volatilidad Histórica Ajustada',
+              name=f'{ticker} Volatilidad Histórica Ajustada',
               yaxis='y2'
           ))
 
@@ -544,7 +581,7 @@ if selected_ticker:
 
           # Actualizar el diseño del gráfico para incluir dos ejes Y
           fig_vol.update_layout(
-              title=f'Precio Ajustado por Inflación y Volatilidad Histórica de {selected_ticker}',
+              title=f'Precio Ajustado por Inflación y Volatilidad Histórica de {ticker}',
               xaxis_title='Fecha',
               yaxis=dict(
                   title='Precio de Cierre Ajustado por Inflación (ARS)',
@@ -572,4 +609,4 @@ if selected_ticker:
           st.plotly_chart(fig_vol)
 
   except Exception as e:
-      st.error(f"Ocurrió un error al procesar el ticker {selected_ticker}: {e}")
+      st.error(f"Ocurrió un error al procesar el ticker {ticker}: {e}")
