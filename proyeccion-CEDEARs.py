@@ -71,6 +71,9 @@ else:
     st.error(f"No se encontró un ratio para {ticker_lookup}.")
     st.stop()
 
+# Fetch the current exchange rate using YPF.BA and YPF
+current_exchange_rate = get_stock_data('YPF.BA', start_date, end_date).iloc[-1] / get_stock_data('YPF', start_date, end_date).iloc[-1]
+
 # Future Projections: Prediction of future stock prices and inflation adjustments
 predicted_dates = pd.date_range(start=datetime.now(), end=end_date, freq='D')
 predicted_stock_prices = []
@@ -79,13 +82,20 @@ predicted_stock_prices = []
 initial_stock_price = adjusted_stock_data.iloc[-1]  # Last available stock price (adjusted for splits)
 initial_underlying_price = underlying_data.iloc[-1]  # Last available price of the underlying asset
 
+# Create an array of interpolated exchange rates from the current rate to the future rate
+interpolated_exchange_rates = pd.Series(
+    [current_exchange_rate + (future_dollar_rate - current_exchange_rate) * (i / len(predicted_dates))
+     for i in range(len(predicted_dates))],
+    index=predicted_dates
+)
+
 # Project future prices and apply inflation adjustments
 for i, date in enumerate(predicted_dates):
     # Calculate the future price of the underlying asset (compounded growth)
     future_price_underlying = initial_underlying_price * (1 + growth_rate_underlying_asset) ** (i / 365)
 
     # Calculate the future price of the CEDEAR in ARS using the projected dollar rate
-    projected_stock_price = (future_price_underlying / conversion_ratio) * future_dollar_rate
+    projected_stock_price = (future_price_underlying / conversion_ratio) * interpolated_exchange_rates[date]
 
     # Apply inflation adjustment based on the monthly inflation rate
     inflation_adjustment = (1 + future_inflation_rate) ** (i / 30)  # Inflation compounded monthly
