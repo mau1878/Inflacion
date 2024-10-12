@@ -5,60 +5,59 @@ import yfinance as yf
 import plotly.graph_objs as go
 import numpy as np
 
-# **Important:** `st.set_page_config` must be the first Streamlit command
+# **Importante:** `st.set_page_config` debe ser el primer comando de Streamlit
 st.set_page_config(
   page_title="Proyección de CEDEARs Ajustados por Inflación",
   layout="wide"
 )
 
-# Importing the split adjustment function
+# Importación de la función de ajuste de splits
 from inflacion import ajustar_precios_por_splits  # Asegúrate de que este módulo está limpio
 
-# Title of the app
+# Título de la aplicación
 st.title("Proyección del rendimiento de CEDEARs ajustados por inflación")
 
-# Load CPI data with caching
+# ### Carga de datos de IPC con caché
 @st.cache_data
 def load_cpi_data():
-  cpi = pd.read_csv('inflaciónargentina2.csv')
-  cpi['Date'] = pd.to_datetime(cpi['Date'], format='%d/%m/%Y')
-  cpi.set_index('Date', inplace=True)
-  # Asegura que 'CPI_MoM' esté en formato decimal (e.g., 5% como 0.05)
-  if cpi['CPI_MoM'].max() > 10:
-      cpi['CPI_MoM'] = cpi['CPI_MoM'] / 100
-  cpi['Cumulative_Inflation'] = (1 + cpi['CPI_MoM']).cumprod()
-  daily_cpi = cpi['Cumulative_Inflation'].resample('D').interpolate(method='linear')
-  return daily_cpi
+  try:
+      cpi = pd.read_csv('inflaciónargentina2.csv')
+      cpi['Date'] = pd.to_datetime(cpi['Date'], format='%d/%m/%Y')
+      cpi.set_index('Date', inplace=True)
+      # Asegurar que 'CPI_MoM' esté en formato decimal (ejemplo: 5% como 0.05)
+      if cpi['CPI_MoM'].max() > 10:
+          cpi['CPI_MoM'] = cpi['CPI_MoM'] / 100
+      cpi['Cumulative_Inflation'] = (1 + cpi['CPI_MoM']).cumprod()
+      daily_cpi = cpi['Cumulative_Inflation'].resample('D').interpolate(method='linear')
+      return daily_cpi
+  except FileNotFoundError:
+      st.error("El archivo 'inflaciónargentina2.csv' no se encontró.")
+      st.stop()
+  except Exception as e:
+      st.error(f"Error al cargar los datos de inflación: {e}")
+      st.stop()
 
-# Load CEDEAR conversion ratios with caching
+# ### Carga de ratios de CEDEAR con caché
 @st.cache_data
 def load_cedear_ratios():
-  ratios = pd.read_csv('ratioscedears.csv')
-  return ratios.set_index('CEDEAR')
+  try:
+      ratios = pd.read_csv('ratioscedears.csv')
+      return ratios.set_index('CEDEAR')
+  except FileNotFoundError:
+      st.error("El archivo 'ratioscedears.csv' no se encontró.")
+      st.stop()
+  except Exception as e:
+      st.error(f"Error al cargar las ratios de CEDEARs: {e}")
+      st.stop()
 
-# Load data and handle potential errors
-try:
-  daily_cpi = load_cpi_data()
-except FileNotFoundError:
-  st.error("El archivo 'inflaciónargentina2.csv' no se encontró.")
-  st.stop()
-except Exception as e:
-  st.error(f"Error al cargar los datos de inflación: {e}")
-  st.stop()
+# Carga de datos
+daily_cpi = load_cpi_data()
+cedear_ratios = load_cedear_ratios()
 
-try:
-  cedear_ratios = load_cedear_ratios()
-except FileNotFoundError:
-  st.error("El archivo 'ratioscedears.csv' no se encontró.")
-  st.stop()
-except Exception as e:
-  st.error(f"Error al cargar las ratios de CEDEARs: {e}")
-  st.stop()
-
-# Sidebar for user inputs
+# ### Barra lateral para entradas de usuario
 st.sidebar.header("Parámetros de Proyección")
 
-# Inputs for historical and future projections
+# Entradas para fechas de inicio y fin
 start_date_default = datetime(2022, 1, 1)
 end_date_default = datetime.now() + timedelta(days=365)
 
@@ -79,6 +78,7 @@ if end_date <= start_date:
   st.sidebar.error("La fecha de finalización debe ser posterior a la fecha de inicio.")
   st.stop()
 
+# Entrada para tipo de cambio futuro
 future_dollar_rate = st.sidebar.number_input(
   "Predicción futura del tipo de cambio (USD/ARS)",
   min_value=0.0,
@@ -86,6 +86,7 @@ future_dollar_rate = st.sidebar.number_input(
   step=10.0
 )
 
+# Entrada para tasa de inflación futura
 future_inflation_rate = st.sidebar.number_input(
   "Tasa de inflación mensual estimada (%)",
   min_value=0.0,
@@ -94,6 +95,7 @@ future_inflation_rate = st.sidebar.number_input(
   step=0.1
 ) / 100
 
+# Entrada para tasa de crecimiento del activo subyacente
 growth_rate_underlying_asset = st.sidebar.number_input(
   "Tasa de crecimiento anual del activo subyacente (%)",
   min_value=-100.0,
@@ -101,7 +103,7 @@ growth_rate_underlying_asset = st.sidebar.number_input(
   step=0.1
 ) / 100
 
-# Input for CEDEAR and its underlying asset
+# Entradas para tickers de CEDEAR y activo subyacente
 ticker = st.sidebar.text_input(
   "Ingresar CEDEAR (por ejemplo, SPY.BA):",
   value="SPY.BA"
@@ -112,16 +114,16 @@ underlying_ticker = st.sidebar.text_input(
   value="SPY"
 ).upper()
 
-# Sidebar: Simulaciones de Tipo de Cambio
+# ### Simulaciones de Tipo de Cambio
 st.sidebar.subheader("Simulaciones de Tipo de Cambio (USD/ARS)")
 
-# Default exchange events: proporcionar ejemplos o dejar vacío
+# Eventos de tipo de cambio por defecto
 default_exchange_events = [
   {"Fecha": datetime(2024, 6, 1), "USD/ARS": 750.0},
   {"Fecha": datetime(2024, 12, 1), "USD/ARS": 850.0},
 ]
 
-# Quitar el argumento 'label' y mantener solo los parámetros válidos
+# Editor de datos para eventos de tipo de cambio
 exchange_events = st.sidebar.data_editor(
   default_exchange_events,
   column_config={
@@ -132,7 +134,7 @@ exchange_events = st.sidebar.data_editor(
   use_container_width=True
 )
 
-# Function to fetch stock data with caching
+# ### Función para descargar datos de stock con caché
 @st.cache_data(show_spinner=False)
 def get_stock_data(ticker, start, end):
   try:
@@ -144,14 +146,14 @@ def get_stock_data(ticker, start, end):
       st.error(f"Error al descargar datos para {ticker}: {e}")
       return None
 
-# Fetch stock data for CEDEAR and the underlying asset
+# Descargar datos de CEDEAR y activo subyacente
 with st.spinner("Descargando datos de CEDEAR..."):
   stock_data = get_stock_data(ticker, start_date, end_date)
 
 with st.spinner("Descargando datos del activo subyacente..."):
   underlying_data = get_stock_data(underlying_ticker, start_date, end_date)
 
-# Validate fetched data
+# Validación de datos descargados
 if stock_data is None:
   st.error(f"No se encontraron datos para el ticker CEDEAR '{ticker}'. Verifique el símbolo y el rango de fechas.")
   st.stop()
@@ -160,15 +162,14 @@ if underlying_data is None:
   st.error(f"No se encontraron datos para el activo subyacente '{underlying_ticker}'. Verifique el símbolo y el rango de fechas.")
   st.stop()
 
-# Adjust stock data for splits
+# ### Ajuste de datos de stock por splits
 try:
   adjusted_stock_data = ajustar_precios_por_splits(stock_data, ticker)
 except Exception as e:
   st.error(f"Error al ajustar los precios por splits: {e}")
   st.stop()
 
-# Retrieve the CEDEAR conversion ratio from the loaded data
-# Remove the '.BA' suffix for the lookup
+# ### Obtención del ratio de conversión de CEDEAR
 ticker_lookup = ticker.replace('.BA', '')
 
 if ticker_lookup in cedear_ratios.index:
@@ -181,8 +182,7 @@ else:
   st.error(f"No se encontró un ratio para {ticker_lookup}.")
   st.stop()
 
-# **Corrected Ticker for YPF: Replace 'YPF.BA' with 'YPFD.BA'**
-# Fetch the current exchange rate using YPFD.BA and YPF
+# ### Obtener la tasa de cambio actual usando YPFD.BA y YPF
 with st.spinner("Calculando la tasa de cambio actual..."):
   ypf_ba_data = get_stock_data('YPFD.BA', start_date, end_date)  # Ticker corregido
   ypf_data = get_stock_data('YPF', start_date, end_date)
@@ -191,81 +191,80 @@ with st.spinner("Calculando la tasa de cambio actual..."):
       st.error("No se encontraron datos para YPFD.BA o YPF en el rango de fechas seleccionado.")
       st.stop()
 
-  # Ensure there are overlapping dates
+  # Asegurar que hay fechas comunes para calcular la tasa de cambio
   common_dates = ypf_ba_data.index.intersection(ypf_data.index)
   if common_dates.empty:
       st.error("No hay fechas coincidentes entre YPFD.BA y YPF para calcular la tasa de cambio.")
       st.stop()
 
-  # Calculate the current exchange rate
+  # Calcular la tasa de cambio actual
   current_exchange_rate = ypf_ba_data.loc[common_dates].iloc[-1] / ypf_data.loc[common_dates].iloc[-1]
 
-# Function to compute projected exchange rates with user-defined events
+# ### Función para calcular tasa de cambio proyectada con eventos de usuario
 def compute_projected_exchange_rates(start_date, end_date, current_rate, future_rate, exchange_events):
   """
-  Compute the projected USD/ARS exchange rate series, incorporating user-defined events.
+  Calcular la serie de tasas de cambio USD/ARS proyectadas, incorporando eventos definidos por el usuario.
 
-  Parameters:
-  - start_date (datetime): Start of the projection period.
-  - end_date (datetime): End of the projection period.
-  - current_rate (float): Current exchange rate.
-  - future_rate (float): Future exchange rate at end_date.
-  - exchange_events (list of dict): List of {'Fecha': date, 'USD/ARS': rate}
+  Parámetros:
+  - start_date (datetime): Inicio del período de proyección.
+  - end_date (datetime): Fin del período de proyección.
+  - current_rate (float): Tasa de cambio actual.
+  - future_rate (float): Tasa de cambio futura al final del período.
+  - exchange_events (list of dict): Lista de {'Fecha': date, 'USD/ARS': rate}
 
-  Returns:
-  - pd.Series: Daily exchange rates from projection_start_date to end_date.
+  Retorna:
+  - pd.Series: Tasas de cambio diarias proyectadas desde start_date hasta end_date.
   """
-  # Create list of all exchange rate points
+  # Crear lista de puntos de tasa de cambio
   points = []
-  # Start point
+  # Punto de inicio
   points.append({"Fecha": start_date, "USD/ARS": current_rate})
-  # Add user-defined events within the projection period
+  # Añadir eventos definidos por el usuario dentro del período de proyección
   for event in exchange_events:
       event_date = event["Fecha"]
       event_rate = event["USD/ARS"]
-      # Validate the event date is within the projection period
       if start_date < event_date < end_date:
           points.append({"Fecha": event_date, "USD/ARS": event_rate})
-  # End point
+  # Punto final
   points.append({"Fecha": end_date, "USD/ARS": future_rate})
 
-  # Create DataFrame
+  # Crear DataFrame
   points_df = pd.DataFrame(points)
-  # Remove duplicate dates
+  # Eliminar fechas duplicadas
   points_df = points_df.drop_duplicates(subset="Fecha")
-  # Sort by Fecha
+  # Ordenar por fecha
   points_df = points_df.sort_values("Fecha")
 
-  # Create a date range from start_date to end_date
+  # Crear rango de fechas para proyección
   projection_dates = pd.date_range(start=start_date, end=end_date, freq='D')
 
-  # Set 'Fecha' as index
+  # Establecer 'Fecha' como índice
   points_df.set_index("Fecha", inplace=True)
 
-  # Reindex to the projection dates
+  # Reindexar a las fechas de proyección
   exchange_rate_series = points_df['USD/ARS'].reindex(projection_dates, method=None)
 
-  # Now perform linear interpolation to fill missing values
+  # Interpolar linealmente para llenar los valores faltantes
   exchange_rate_series = exchange_rate_series.interpolate(method='linear')
 
-  # Any remaining NaNs (e.g., before first event), fill with current_rate
+  # Rellenar cualquier NaN restante (por ejemplo, antes del primer evento) con la tasa actual
   exchange_rate_series = exchange_rate_series.fillna(current_rate)
 
   return exchange_rate_series
 
-# Assign projection_start_date separately para evitar el operador walrus
+# Asignar projection_start_date por separado para evitar errores de sintaxis
 projection_start_date = datetime.now()
 
-# Compute projected exchange rates
+# Calcular las tasas de cambio proyectadas
 projected_exchange_rates = compute_projected_exchange_rates(
   start_date=projection_start_date,
   end_date=end_date,
   current_rate=current_exchange_rate,
   future_rate=future_dollar_rate,
-  exchange_events=exchange_events.to_dict('records')  # Convert DataFrame to list of dicts
+  exchange_events=exchange_events  # Pasar directamente la lista de diccionarios
 )
 
-# Future Projections: Prediction of future stock prices and inflation adjustments
+# ### Proyecciones Futuras: Precio ajustado por inflación y desempeño esperado
 predicted_dates = pd.date_range(start=projection_start_date, end=end_date, freq='D')
 num_days = len(predicted_dates)
 
@@ -273,43 +272,41 @@ if num_days == 0:
   st.error("El período de proyección no contiene días.")
   st.stop()
 
-# Initial prices for starting the projection
-initial_underlying_price = underlying_data.iloc[-1]  # Last available price of the underlying asset
-initial_ce_dear_price = adjusted_stock_data.iloc[-1]  # Last historical adjusted CEDEAR price
+# Precios iniciales para iniciar la proyección
+initial_underlying_price = underlying_data.iloc[-1]  # Último precio disponible del activo subyacente
+initial_ce_dear_price = adjusted_stock_data.iloc[-1]  # Último precio ajustado del CEDEAR
 
-# Calculate daily growth rate based on annual growth rate
+# Calcular la tasa de crecimiento diaria basada en la tasa anual
 daily_growth_rate = (1 + growth_rate_underlying_asset) ** (1 / 365) - 1
 
-# Calculate daily inflation rate based on monthly inflation rate
+# Calcular la tasa de inflación diaria basada en la tasa de inflación mensual
 daily_inflation_rate = (1 + future_inflation_rate) ** (1 / 30) - 1
 
-# Generate an array representing each day in the projection period
+# Crear un array que representa los días transcurridos
 days_passed = np.arange(num_days)
 
-# **1. Inflation-Following Projection**
-# CEDEAR price increases exactly with inflation
+# **1. Proyección siguiendo la inflación**
 inflacion_following_prices = initial_ce_dear_price * (1 + daily_inflation_rate) ** days_passed
 
-# **2. Expected Performance Projection**
-# CEDEAR price based on underlying asset growth and projected exchange rates
+# **2. Proyección basada en desempeño esperado**
 future_prices_underlying = initial_underlying_price * (1 + daily_growth_rate) ** days_passed
 expected_performance_prices = (future_prices_underlying / conversion_ratio) * projected_exchange_rates.values
 
-# Create DataFrame for projected data
+# Crear DataFrame para las proyecciones
 projection_df = pd.DataFrame({
   'Date': predicted_dates,
   'CEDEAR Sigue Inflación': inflacion_following_prices,
   'CEDEAR Esperado': expected_performance_prices
 })
 
-# Calculate percentage performance relative to initial price
+# Calcular el rendimiento porcentual relativo al precio inicial
 projection_df['CEDEAR Sigue Inflación (%)'] = (projection_df['CEDEAR Sigue Inflación'] / initial_ce_dear_price - 1) * 100
 projection_df['CEDEAR Esperado (%)'] = (projection_df['CEDEAR Esperado'] / initial_ce_dear_price - 1) * 100
 
-# Plotting the historical and future projections (Price Plot)
+# ### Graficar Proyecciones (Precio Absoluto)
 fig = go.Figure()
 
-# Historical stock price (adjusted for splits)
+# Precio histórico ajustado por splits
 fig.add_trace(go.Scatter(
   x=adjusted_stock_data.index,
   y=adjusted_stock_data,
@@ -318,7 +315,7 @@ fig.add_trace(go.Scatter(
   line=dict(color='blue')
 ))
 
-# Inflation-Following Projection
+# Proyección siguiendo la inflación
 fig.add_trace(go.Scatter(
   x=projection_df['Date'],
   y=projection_df['CEDEAR Sigue Inflación'],
@@ -327,7 +324,7 @@ fig.add_trace(go.Scatter(
   line=dict(color='green', dash='dash')
 ))
 
-# Expected Performance Projection
+# Proyección basada en desempeño esperado
 fig.add_trace(go.Scatter(
   x=projection_df['Date'],
   y=projection_df['CEDEAR Esperado'],
@@ -336,7 +333,7 @@ fig.add_trace(go.Scatter(
   line=dict(color='orange', dash='dot')
 ))
 
-# Layout adjustments
+# Ajustes de layout
 fig.update_layout(
   title="Proyección del rendimiento de CEDEAR ajustado por inflación",
   xaxis_title="Fecha",
@@ -345,13 +342,13 @@ fig.update_layout(
   hovermode='x unified'
 )
 
-# Display the first interactive plot
+# Mostrar el primer gráfico interactivo
 st.plotly_chart(fig, use_container_width=True)
 
-# Plotting the percentage performance (Secondary Plot)
+# ### Graficar Proyecciones (Rendimiento Porcentual)
 fig2 = go.Figure()
 
-# CEDEAR Sigue Inflación (%)
+# Rendimiento siguiendo la inflación (%)
 fig2.add_trace(go.Scatter(
   x=projection_df['Date'],
   y=projection_df['CEDEAR Sigue Inflación (%)'],
@@ -360,7 +357,7 @@ fig2.add_trace(go.Scatter(
   line=dict(color='green', dash='dash')
 ))
 
-# CEDEAR Esperado (%)
+# Rendimiento basado en desempeño esperado (%)
 fig2.add_trace(go.Scatter(
   x=projection_df['Date'],
   y=projection_df['CEDEAR Esperado (%)'],
@@ -369,7 +366,7 @@ fig2.add_trace(go.Scatter(
   line=dict(color='orange', dash='dot')
 ))
 
-# Layout adjustments for the secondary plot
+# Ajustes de layout para el segundo gráfico
 fig2.update_layout(
   title="Proyección del rendimiento de CEDEAR en Porcentajes",
   xaxis_title="Fecha",
@@ -378,30 +375,31 @@ fig2.update_layout(
   hovermode='x unified'
 )
 
-# Display the second interactive plot
+# Mostrar el segundo gráfico interactivo
 st.plotly_chart(fig2, use_container_width=True)
 
-# Display key metrics
+# ### Resumen de la Proyección
 st.subheader("Resumen de Proyección")
 
-# Final projected prices
+# Precios proyectados finales
 final_inflacion_price = inflacion_following_prices[-1]
 final_expected_price = expected_performance_prices[-1]
 
-# Performance calculations
-performance_inflacion = (inflacion_following_prices[-1] / initial_ce_dear_price - 1) * 100
-performance_expected = (expected_performance_prices[-1] / initial_ce_dear_price - 1) * 100
+# Cálculo de rendimiento porcentual
+performance_inflacion = (final_inflacion_price / initial_ce_dear_price - 1) * 100
+performance_expected = (final_expected_price / initial_ce_dear_price - 1) * 100
 
-# Display metrics for Inflation-Following Projection
+# Mostrar métricas para la proyección que sigue la inflación
 st.write(f"**Precio inicial ajustado:** ${initial_ce_dear_price:,.2f} ARS")
 st.write(f"**Precio proyectado ajustado al {end_date.strftime('%d/%m/%Y')} (Sigue Inflación):** ${final_inflacion_price:,.2f} ARS")
 st.write(f"**Rendimiento proyectado ajustado por inflación (Sigue Inflación):** {performance_inflacion:.2f}%")
-st.write("---")
-# Display metrics for Expected Performance Projection
+st.write("---")  # Línea horizontal para separación
+
+# Mostrar métricas para la proyección basada en desempeño esperado
 st.write(f"**Precio proyectado ajustado al {end_date.strftime('%d/%m/%Y')} (Esperado):** ${final_expected_price:,.2f} ARS")
 st.write(f"**Rendimiento proyectado ajustado por inflación (Esperado):** {performance_expected:.2f}%")
 
-# Optional: Display comparison table
+# ### Tabla de Comparación de Proyecciones
 st.subheader("Comparación de Proyecciones")
 
 comparison_df = pd.DataFrame({
