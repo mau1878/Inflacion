@@ -72,7 +72,16 @@ else:
     st.stop()
 
 # Fetch the current exchange rate using YPF.BA and YPF
-current_exchange_rate = get_stock_data('YPF.BA', start_date, end_date).iloc[-1] / get_stock_data('YPF', start_date, end_date).iloc[-1]
+ypf_ba_data = get_stock_data('YPF.BA', start_date, end_date)
+ypf_data = get_stock_data('YPF', start_date, end_date)
+
+# Check if data is available
+if ypf_ba_data.empty or ypf_data.empty:
+    st.error("No se encontraron datos para YPF.BA o YPF en el rango de fechas seleccionado.")
+    st.stop()
+
+# Now safely access the last available prices
+current_exchange_rate = ypf_ba_data.iloc[-1] / ypf_data.iloc[-1]
 
 # Future Projections: Prediction of future stock prices and inflation adjustments
 predicted_dates = pd.date_range(start=datetime.now(), end=end_date, freq='D')
