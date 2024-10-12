@@ -560,6 +560,7 @@ if selected_ticker:
               y=stock_data['Inflation_Adjusted_Close'],
               mode='lines',
               name=f'{ticker} Precio Ajustado por Inflación',
+              line=dict(color='#1f77b4'),  # Color del eje y1
               yaxis='y1'
           ))
 
@@ -569,6 +570,7 @@ if selected_ticker:
               y=stock_data['Volatility_Adjusted'],
               mode='lines',
               name=f'{ticker} Volatilidad Histórica Ajustada',
+              line=dict(color='#ff7f0e'),  # Color del eje y2
               yaxis='y2'
           ))
 
