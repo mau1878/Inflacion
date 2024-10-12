@@ -349,11 +349,15 @@ if tickers_input:
           # Ordenar tickers por longitud descendente para evitar reemplazos parciales
           sorted_tickers = sorted(ticker_var_map.keys(), key=len, reverse=True)
           transformed_expression = custom_expression
+          used_ba_tickers = set()  # Para rastrear si se usa algún .BA ticker
+
           for ticker in sorted_tickers:
               var_name = ticker_var_map[ticker]
               # Usar regex para reemplazar solo ocurrencias completas del ticker
               pattern = re.escape(ticker)
               transformed_expression = re.sub(rf'\b{pattern}\b', var_name, transformed_expression)
+              if ticker.endswith('.BA'):
+                  used_ba_tickers.add(ticker)
 
           # Crear un DataFrame combinado con todas las series nominales
           combined_nominal_df = pd.DataFrame(stock_data_dict_nominal)
@@ -367,15 +371,16 @@ if tickers_input:
           # Crear un DataFrame para la expresión personalizada
           custom_series_nominal = custom_series_nominal.to_frame(name='Custom_Nominal')
 
-          # Determinar si el resultado de la expresión termina con '.BA'
-          # Si es así, ajustar por inflación; de lo contrario, no
-          expression_inflation = custom_expression.strip().split('(')[0].upper().endswith('.BA')
-
-          if expression_inflation:
+          # Determinar si se debe ajustar por inflación
+          # Solo ajustar si al menos uno de los tickers usados termina con '.BA'
+          if used_ba_tickers:
               # Ajustar por inflación
               custom_series_nominal = custom_series_nominal.join(daily_cpi, how='left')
+              # Rellenar hacia adelante cualquier dato de inflación faltante
               custom_series_nominal['Cumulative_Inflation'].ffill(inplace=True)
+              # Eliminar cualquier fila restante con NaN en 'Cumulative_Inflation'
               custom_series_nominal.dropna(subset=['Cumulative_Inflation'], inplace=True)
+              # Calcular 'Inflation_Adjusted_Custom'
               custom_series_nominal['Inflation_Adjusted_Custom'] = custom_series_nominal['Custom_Nominal'] * (custom_series_nominal['Cumulative_Inflation'].iloc[-1] / custom_series_nominal['Cumulative_Inflation'])
               adjusted_series = custom_series_nominal['Inflation_Adjusted_Custom']
           else:
@@ -440,7 +445,6 @@ if tickers_input:
       fig.update_layout(
           title='Precios Históricos Ajustados por Inflación (%)',
           xaxis_title='Fecha',
-          yaxis_title='Variación Porcentual (%)',
           yaxis=dict(
               title='Variación Porcentual (%)',
               titlefont=dict(color='#1f77b4'),
@@ -459,7 +463,6 @@ if tickers_input:
       fig.update_layout(
           title='Precios Históricos Ajustados por Inflación',
           xaxis_title='Fecha',
-          yaxis_title='Precio de Cierre Ajustado (ARS)',
           yaxis=dict(
               title='Precio de Cierre Ajustado (ARS)',
               titlefont=dict(color='#1f77b4'),
