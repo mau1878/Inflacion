@@ -12,7 +12,7 @@ st.set_page_config(
 )
 
 # Importing the split adjustment function
-from inflacion import ajustar_precios_por_splits  # Ensure this module is clean
+from inflacion import ajustar_precios_por_splits  # Asegúrate de que este módulo está limpio
 
 # Title of the app
 st.title("Proyección del rendimiento de CEDEARs ajustados por inflación")
@@ -23,7 +23,7 @@ def load_cpi_data():
   cpi = pd.read_csv('inflaciónargentina2.csv')
   cpi['Date'] = pd.to_datetime(cpi['Date'], format='%d/%m/%Y')
   cpi.set_index('Date', inplace=True)
-  # Ensure 'CPI_MoM' is in decimal form (e.g., 5% as 0.05)
+  # Asegura que 'CPI_MoM' esté en formato decimal (e.g., 5% como 0.05)
   if cpi['CPI_MoM'].max() > 10:
       cpi['CPI_MoM'] = cpi['CPI_MoM'] / 100
   cpi['Cumulative_Inflation'] = (1 + cpi['CPI_MoM']).cumprod()
@@ -115,20 +115,21 @@ underlying_ticker = st.sidebar.text_input(
 # Sidebar: Simulaciones de Tipo de Cambio
 st.sidebar.subheader("Simulaciones de Tipo de Cambio (USD/ARS)")
 
-# Default exchange events: empty or some examples
+# Default exchange events: proporcionar ejemplos o dejar vacío
 default_exchange_events = [
   {"Fecha": datetime(2024, 6, 1), "USD/ARS": 750.0},
   {"Fecha": datetime(2024, 12, 1), "USD/ARS": 850.0},
 ]
 
+# Quitar el argumento 'label' y mantener solo los parámetros válidos
 exchange_events = st.sidebar.data_editor(
   default_exchange_events,
   column_config={
       "Fecha": st.column_config.DateColumn("Fecha de Evento"),
       "USD/ARS": st.column_config.NumberColumn("Tipo de Cambio (USD/ARS)", format="%.2f"),
   },
-  label="Ingrese eventos de tipo de cambio",
   num_rows="dynamic",
+  use_container_width=True
 )
 
 # Function to fetch stock data with caching
@@ -183,7 +184,7 @@ else:
 # **Corrected Ticker for YPF: Replace 'YPF.BA' with 'YPFD.BA'**
 # Fetch the current exchange rate using YPFD.BA and YPF
 with st.spinner("Calculando la tasa de cambio actual..."):
-  ypf_ba_data = get_stock_data('YPFD.BA', start_date, end_date)  # Corrected Ticker
+  ypf_ba_data = get_stock_data('YPFD.BA', start_date, end_date)  # Ticker corregido
   ypf_data = get_stock_data('YPF', start_date, end_date)
 
   if ypf_ba_data is None or ypf_data is None:
@@ -252,7 +253,7 @@ def compute_projected_exchange_rates(start_date, end_date, current_rate, future_
 
   return exchange_rate_series
 
-# Assign projection_start_date separately to avoid syntax error
+# Assign projection_start_date separately para evitar el operador walrus
 projection_start_date = datetime.now()
 
 # Compute projected exchange rates
