@@ -221,7 +221,7 @@ def compute_projected_exchange_rates(start_date, end_date, current_rate, future_
   points.append({"Fecha": start_date, "USD/ARS": current_rate})
   # Añadir eventos definidos por el usuario dentro del período de proyección
   for event in exchange_events:
-      event_date = event["Fecha"]
+      event_date = pd.Timestamp(event["Fecha"])  # Convertir a Timestamp
       event_rate = event["USD/ARS"]
       if start_date < event_date < end_date:
           points.append({"Fecha": event_date, "USD/ARS": event_rate})
@@ -232,7 +232,7 @@ def compute_projected_exchange_rates(start_date, end_date, current_rate, future_
   points_df = pd.DataFrame(points)
   # Eliminar fechas duplicadas
   points_df = points_df.drop_duplicates(subset="Fecha")
-  # Ordenar por fecha
+  # Ordenar por Fecha
   points_df = points_df.sort_values("Fecha")
 
   # Crear rango de fechas para proyección
@@ -286,9 +286,11 @@ daily_inflation_rate = (1 + future_inflation_rate) ** (1 / 30) - 1
 days_passed = np.arange(num_days)
 
 # **1. Proyección siguiendo la inflación**
+# Precio del CEDEAR aumentando exactamente con la inflación
 inflacion_following_prices = initial_ce_dear_price * (1 + daily_inflation_rate) ** days_passed
 
 # **2. Proyección basada en desempeño esperado**
+# Precio del CEDEAR basado en el crecimiento del activo subyacente y tasas de cambio proyectadas
 future_prices_underlying = initial_underlying_price * (1 + daily_growth_rate) ** days_passed
 expected_performance_prices = (future_prices_underlying / conversion_ratio) * projected_exchange_rates.values
 
