@@ -3,9 +3,9 @@ import pandas as pd
 import yfinance as yf
 import plotly.graph_objs as go
 from datetime import datetime, timedelta
-from inflacion import ajustar_precios_por_splits  # Importing the split adjustment function from your original script
+from inflacion import ajustar_precios_por_splits  # Importing split adjustment function
 
-# Function to load CPI data (already exists)
+# Load CPI data
 @st.cache_data
 def load_cpi_data():
     try:
@@ -24,78 +24,87 @@ daily_cpi = load_cpi_data()
 
 # User Inputs
 st.title("Proyección del rendimiento de CEDEARs ajustados por inflación")
+
+# Inputs for historical and future projections
 start_date = st.date_input("Fecha de compra de CEDEARs (Inicio)", value=datetime(2024, 1, 1))
 end_date = st.date_input("Fecha de finalización de la predicción", value=datetime.now() + timedelta(days=365))
 future_dollar_rate = st.number_input("Predicción futura del tipo de cambio (USD/ARS)", value=800.0)
 future_inflation_rate = st.number_input("Tasa de inflación mensual estimada (%)", value=5.0) / 100
 growth_rate_underlying_asset = st.number_input("Tasa de crecimiento del activo subyacente (%)", value=10.0) / 100
 
-# Fetch stock data for the selected CEDEAR (e.g., SPY.BA) and underlying asset (e.g., SPY)
+# Input for CEDEAR and its underlying asset
 ticker = st.text_input("Ingresar CEDEAR (por ejemplo, SPY.BA):", value="SPY.BA")
 underlying_ticker = st.text_input("Ingresar ticker del activo subyacente (por ejemplo, SPY):", value="SPY")
 
-# Fetch data from yfinance
+# Fetch stock data using yfinance
 @st.cache_data
 def get_stock_data(ticker, start_date, end_date):
     df = yf.download(ticker, start=start_date, end=end_date)
     return df['Adj Close']
 
-# Fetch data for stock and underlying asset
+# Get stock data for both CEDEAR and the underlying asset
 stock_data = get_stock_data(ticker, start_date, end_date)
 underlying_data = get_stock_data(underlying_ticker, start_date, end_date)
 
-# Adjust for splits (using the imported function)
+# Adjust stock data for splits (past data)
 adjusted_stock_data = ajustar_precios_por_splits(stock_data, ticker)
 
-# Future Projections
+# Future Projections: Prediction of future stock prices and inflation adjustments
 predicted_dates = pd.date_range(start=datetime.now(), end=end_date, freq='D')
 predicted_stock_prices = []
 
-# Initial values
-initial_stock_price = adjusted_stock_data.iloc[-1]
-initial_underlying_price = underlying_data.iloc[-1]
+# Initial prices for starting the projection
+initial_stock_price = adjusted_stock_data.iloc[-1]  # Last available stock price (adjusted for splits)
+initial_underlying_price = underlying_data.iloc[-1]  # Last available price of the underlying asset
 
-# Project future prices
+# Project future prices and apply inflation adjustments
 for i, date in enumerate(predicted_dates):
-    # Adjust for growth of the underlying asset and inflation
+    # Calculate the future price of the underlying asset (compounded growth)
     future_price_underlying = initial_underlying_price * (1 + growth_rate_underlying_asset) ** (i / 365)
+
+    # Calculate the future price of the CEDEAR in ARS using the projected dollar rate
     projected_stock_price = future_price_underlying * future_dollar_rate
-    inflation_adjustment = (1 + future_inflation_rate) ** (i / 30)  # Monthly inflation adjustment
-    adjusted_stock_price = projected_stock_price / inflation_adjustment
-    predicted_stock_prices.append(adjusted_stock_price)
+
+    # Apply inflation adjustment based on the monthly inflation rate
+    inflation_adjustment = (1 + future_inflation_rate) ** (i / 30)  # Inflation compounded monthly
+    inflation_adjusted_price = projected_stock_price / inflation_adjustment
+
+    # Store the future inflation-adjusted stock price
+    predicted_stock_prices.append(inflation_adjusted_price)
 
 # Create DataFrame for projected data
 projection_df = pd.DataFrame({
     'Date': predicted_dates,
-    'Projected Stock Price': predicted_stock_prices
+    'Projected Stock Price (ARS)': predicted_stock_prices
 })
 
-# Plotting the results
+# Plotting the historical and future projections
 fig = go.Figure()
 
-# Add line for stock prices
+# Historical stock price (adjusted for splits)
 fig.add_trace(go.Scatter(
-    x=projection_df['Date'],
-    y=projection_df['Projected Stock Price'],
+    x=adjusted_stock_data.index,
+    y=adjusted_stock_data,
     mode='lines',
-    name='Predicted CEDEAR Price (Adjusted for Inflation)'
+    name='Precio Histórico (Ajustado por Splits)'
 ))
 
-# Add inflation adjustment
-inflation_values = [1 / ((1 + future_inflation_rate) ** (i / 30)) for i in range(len(predicted_dates))]
+# Projected future stock prices (adjusted for inflation)
 fig.add_trace(go.Scatter(
     x=projection_df['Date'],
-    y=inflation_values,
+    y=projection_df['Projected Stock Price (ARS)'],
     mode='lines',
-    name='Inflation-Adjusted Reference'
+    name='Proyección Ajustada por Inflación'
 ))
 
-# Layout
+# Layout adjustments
 fig.update_layout(
-    title="Proyección del precio ajustado por inflación del CEDEAR",
+    title="Proyección del rendimiento de CEDEAR ajustado por inflación",
     xaxis_title="Fecha",
     yaxis_title="Precio Ajustado (ARS)",
     legend_title="Leyenda",
 )
 
+# Display the interactive plot
 st.plotly_chart(fig)
+
