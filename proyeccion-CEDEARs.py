@@ -192,6 +192,7 @@ if num_days == 0:
 
 # Initial prices for starting the projection
 initial_underlying_price = underlying_data.iloc[-1]  # Last available price of the underlying asset
+initial_ce_dear_price = adjusted_stock_data.iloc[-1]  # Last historical adjusted CEDEAR price
 
 # Create an array of interpolated exchange rates from the current rate to the future rate
 interpolated_exchange_rates = np.linspace(current_exchange_rate, future_dollar_rate, num_days)
@@ -202,25 +203,24 @@ daily_growth_rate = (1 + growth_rate_underlying_asset) ** (1/365) - 1
 # Calculate daily inflation rate based on monthly inflation rate
 daily_inflation_rate = (1 + future_inflation_rate) ** (1/30) - 1
 
-# Projection calculations
-future_prices_underlying = initial_underlying_price * (1 + daily_growth_rate) ** np.arange(num_days)
-projected_stock_prices = (future_prices_underlying / conversion_ratio) * interpolated_exchange_rates
-inflation_factors = (1 + daily_inflation_rate) ** np.arange(num_days)
-inflation_adjusted_prices = projected_stock_prices / inflation_factors
+# Generate an array representing each day in the projection period
+days_passed = np.arange(num_days)
+
+# **1. Inflation-Following Projection**
+# CEDEAR price increases exactly with inflation
+inflacion_following_prices = initial_ce_dear_price * (1 + daily_inflation_rate) ** days_passed
+
+# **2. Expected Performance Projection**
+# CEDEAR price based on underlying asset growth and future exchange rate
+future_prices_underlying = initial_underlying_price * (1 + daily_growth_rate) ** days_passed
+expected_performance_prices = (future_prices_underlying / conversion_ratio) * interpolated_exchange_rates
 
 # Create DataFrame for projected data
 projection_df = pd.DataFrame({
   'Date': predicted_dates,
-  'Projected Stock Price (ARS)': inflation_adjusted_prices
+  'CEDEAR Sigue Inflación': inflacion_following_prices,
+  'CEDEAR Esperado': expected_performance_prices
 })
-
-# Compute Projected Cumulative Inflation for Plotting
-# Starting from the last historical adjusted price
-last_adjusted_price = adjusted_stock_data.iloc[-1]
-cumulative_inflation_projected = (1 + daily_inflation_rate) ** np.arange(num_days)
-inflation_line_projected = last_adjusted_price * cumulative_inflation_projected
-
-projection_df['Inflación Cumulativa'] = inflation_line_projected
 
 # Plotting the historical and future projections
 fig = go.Figure()
@@ -234,23 +234,36 @@ fig.add_trace(go.Scatter(
   line=dict(color='blue')
 ))
 
-# Projected future stock prices (adjusted for inflation)
+# Inflation-Following Projection
 fig.add_trace(go.Scatter(
   x=projection_df['Date'],
-  y=projection_df['Projected Stock Price (ARS)'],
+  y=projection_df['CEDEAR Sigue Inflación'],
   mode='lines',
-  name='Proyección Ajustada por Inflación',
-  line=dict(color='orange', dash='dash')
+  name='CEDEAR Sigue Inflación',
+  line=dict(color='green', dash='dash')
 ))
 
-# Projected cumulative inflation
+# Expected Performance Projection
 fig.add_trace(go.Scatter(
   x=projection_df['Date'],
-  y=projection_df['Inflación Cumulativa'],
+  y=projection_df['CEDEAR Esperado'],
   mode='lines',
-  name='Inflación Cumulativa',
-  line=dict(color='red', dash='dot')
+  name='CEDEAR Esperado',
+  line=dict(color='orange', dash='dot')
 ))
+
+# Optional: Add cumulative inflation for reference
+# This can be similar to 'CEDEAR Sigue Inflación', so it's optional
+# Uncomment below if you want to include it
+# cumulative_inflation_projected = (1 + daily_inflation_rate) ** days_passed
+# inflation_line_projected = initial_ce_dear_price * cumulative_inflation_projected
+# fig.add_trace(go.Scatter(
+#     x=projection_df['Date'],
+#     y=inflation_line_projected,
+#     mode='lines',
+#     name='Inflación Cumulativa',
+#     line=dict(color='red', dash='dot')
+# ))
 
 # Layout adjustments
 fig.update_layout(
@@ -267,11 +280,29 @@ st.plotly_chart(fig, use_container_width=True)
 # Display key metrics
 st.subheader("Resumen de Proyección")
 
-final_projected_price = inflation_adjusted_prices[-1]
-initial_price = adjusted_stock_data.iloc[-1]
+# Final projected prices
+final_inflacion_price = inflacion_following_prices[-1]
+final_expected_price = expected_performance_prices[-1]
 
-performance = ((final_projected_price / initial_price) - 1) * 100
+# Performance calculations
+performance_inflacion = ((final_inflacion_price / initial_ce_dear_price) - 1) * 100
+performance_expected = ((final_expected_price / initial_ce_dear_price) - 1) * 100
 
-st.write(f"**Precio inicial ajustado:** ${initial_price:,.2f} ARS")
-st.write(f"**Precio proyectado ajustado al {end_date.strftime('%d/%m/%Y')}:** ${final_projected_price:,.2f} ARS")
-st.write(f"**Rendimiento proyectado ajustado por inflación:** {performance:.2f}%")
+# Display metrics
+st.write(f"**Precio inicial ajustado:** ${initial_ce_dear_price:,.2f} ARS")
+st.write(f"**Precio proyectado ajustado al {end_date.strftime('%d/%m/%Y')} (Sigue Inflación):** ${final_inflacion_price:,.2f} ARS")
+st.write(f"**Rendimiento proyectado ajustado por inflación (Sigue Inflación):** {performance_inflacion:.2f}%")
+st.write("---")
+st.write(f"**Precio proyectado ajustado al {end_date.strftime('%d/%m/%Y')} (Esperado):** ${final_expected_price:,.2f} ARS")
+st.write(f"**Rendimiento proyectado ajustado por inflación (Esperado):** {performance_expected:.2f}%")
+
+# Optional: Display comparison table
+st.subheader("Comparación de Proyecciones")
+
+comparison_df = pd.DataFrame({
+  'Proyección': ['Sigue Inflación', 'Esperado'],
+  'Precio Proyectado (ARS)': [final_inflacion_price, final_expected_price],
+  'Rendimiento Proyectado (%)': [performance_inflacion, performance_expected]
+})
+
+st.table(comparison_df)
