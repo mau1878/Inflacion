@@ -29,7 +29,7 @@ def load_cedear_ratios():
         st.error("El archivo 'ratioscedears.csv' no se encontró.")
         st.stop()
     
-    return ratios.set_index('CEDEAR')
+    return ratios.set_index('Underlying_Ticker')
 
 daily_cpi = load_cpi_data()
 cedear_ratios = load_cedear_ratios()
@@ -45,8 +45,7 @@ future_inflation_rate = st.number_input("Tasa de inflación mensual estimada (%)
 growth_rate_underlying_asset = st.number_input("Tasa de crecimiento del activo subyacente (%)", value=10.0) / 100
 
 # Input for CEDEAR and its underlying asset
-ticker = st.text_input("Ingresar CEDEAR (por ejemplo, SPY.BA):", value="SPY.BA")
-underlying_ticker = st.text_input("Ingresar ticker del activo subyacente (por ejemplo, SPY):", value="SPY")
+cedear_ticker = st.text_input("Ingresar CEDEAR (por ejemplo, SPY.BA):", value="SPY.BA")
 
 # Fetch stock data using yfinance
 @st.cache_data
@@ -54,19 +53,20 @@ def get_stock_data(ticker, start_date, end_date):
     df = yf.download(ticker, start=start_date, end=end_date)
     return df['Adj Close']
 
+# Retrieve the underlying asset ticker and conversion ratio from the loaded data
+if cedear_ticker in cedear_ratios.index:
+    conversion_ratio = cedear_ratios.loc[cedear_ticker, 'Ratio']
+    underlying_ticker = cedear_ratios.loc[cedear_ticker, 'Underlying_Ticker']
+else:
+    st.error(f"No se encontró un ratio para {cedear_ticker}.")
+    st.stop()
+
 # Get stock data for both CEDEAR and the underlying asset
-stock_data = get_stock_data(ticker, start_date, end_date)
+stock_data = get_stock_data(cedear_ticker, start_date, end_date)
 underlying_data = get_stock_data(underlying_ticker, start_date, end_date)
 
 # Adjust stock data for splits (past data)
-adjusted_stock_data = ajustar_precios_por_splits(stock_data, ticker)
-
-# Retrieve the CEDEAR conversion ratio from the loaded data
-if ticker in cedear_ratios.index:
-    conversion_ratio = cedear_ratios.loc[ticker, 'Ratio']
-else:
-    st.error(f"No se encontró un ratio para {ticker}.")
-    st.stop()
+adjusted_stock_data = ajustar_precios_por_splits(stock_data, cedear_ticker)
 
 # Future Projections: Prediction of future stock prices and inflation adjustments
 predicted_dates = pd.date_range(start=datetime.now(), end=end_date, freq='D')
