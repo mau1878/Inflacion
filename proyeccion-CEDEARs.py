@@ -20,7 +20,19 @@ def load_cpi_data():
     daily_cpi = cpi['Cumulative_Inflation'].resample('D').interpolate(method='linear')
     return daily_cpi
 
+# Load CEDEAR conversion ratios
+@st.cache_data
+def load_cedear_ratios():
+    try:
+        ratios = pd.read_csv('ratioscedears.csv')
+    except FileNotFoundError:
+        st.error("El archivo 'ratioscedears.csv' no se encontró.")
+        st.stop()
+    
+    return ratios.set_index('CEDEAR')
+
 daily_cpi = load_cpi_data()
+cedear_ratios = load_cedear_ratios()
 
 # User Inputs
 st.title("Proyección del rendimiento de CEDEARs ajustados por inflación")
@@ -49,6 +61,13 @@ underlying_data = get_stock_data(underlying_ticker, start_date, end_date)
 # Adjust stock data for splits (past data)
 adjusted_stock_data = ajustar_precios_por_splits(stock_data, ticker)
 
+# Retrieve the CEDEAR conversion ratio from the loaded data
+if ticker in cedear_ratios.index:
+    conversion_ratio = cedear_ratios.loc[ticker, 'Ratio']
+else:
+    st.error(f"No se encontró un ratio para {ticker}.")
+    st.stop()
+
 # Future Projections: Prediction of future stock prices and inflation adjustments
 predicted_dates = pd.date_range(start=datetime.now(), end=end_date, freq='D')
 predicted_stock_prices = []
@@ -63,7 +82,7 @@ for i, date in enumerate(predicted_dates):
     future_price_underlying = initial_underlying_price * (1 + growth_rate_underlying_asset) ** (i / 365)
 
     # Calculate the future price of the CEDEAR in ARS using the projected dollar rate
-    projected_stock_price = future_price_underlying * future_dollar_rate
+    projected_stock_price = (future_price_underlying / conversion_ratio) * future_dollar_rate
 
     # Apply inflation adjustment based on the monthly inflation rate
     inflation_adjustment = (1 + future_inflation_rate) ** (i / 30)  # Inflation compounded monthly
@@ -107,4 +126,3 @@ fig.update_layout(
 
 # Display the interactive plot
 st.plotly_chart(fig)
-
