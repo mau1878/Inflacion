@@ -4,10 +4,16 @@ import yfinance as yf
 import plotly.graph_objs as go
 from datetime import datetime, timedelta
 import numpy as np
-from inflacion import ajustar_precios_por_splits  # Ensure this module is available
 
-# Set Streamlit page configuration
-st.set_page_config(page_title="Proyección de CEDEARs Ajustados por Inflación", layout="wide")
+# Importing the split adjustment function
+# Ensure that the 'inflacion' module does NOT contain any Streamlit commands at the top level
+from inflacion import ajustar_precios_por_splits  # Ensure this module is available and clean
+
+# **Important:** `st.set_page_config` must be the first Streamlit command
+st.set_page_config(
+  page_title="Proyección de CEDEARs Ajustados por Inflación",
+  layout="wide"
+)
 
 # Title of the app
 st.title("Proyección del rendimiento de CEDEARs ajustados por inflación")
@@ -179,8 +185,6 @@ if num_days == 0:
   st.error("El período de proyección no contiene días.")
   st.stop()
 
-predicted_stock_prices = []
-
 # Initial prices for starting the projection
 initial_underlying_price = underlying_data.iloc[-1]  # Last available price of the underlying asset
 
@@ -193,7 +197,7 @@ daily_growth_rate = (1 + growth_rate_underlying_asset) ** (1/365) - 1
 # Calculate daily inflation rate based on monthly inflation rate
 daily_inflation_rate = (1 + future_inflation_rate) ** (1/30) - 1
 
-# Projection loop
+# Projection calculations
 future_prices_underlying = initial_underlying_price * (1 + daily_growth_rate) ** np.arange(num_days)
 projected_stock_prices = (future_prices_underlying / conversion_ratio) * interpolated_exchange_rates
 inflation_factors = (1 + daily_inflation_rate) ** np.arange(num_days)
