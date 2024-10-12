@@ -1,0 +1,101 @@
+import streamlit as st
+import pandas as pd
+import yfinance as yf
+import plotly.graph_objs as go
+from datetime import datetime, timedelta
+from inflacion import ajustar_precios_por_splits  # Importing the split adjustment function from your original script
+
+# Function to load CPI data (already exists)
+@st.cache_data
+def load_cpi_data():
+    try:
+        cpi = pd.read_csv('inflaciónargentina2.csv')
+    except FileNotFoundError:
+        st.error("El archivo 'inflaciónargentina2.csv' no se encontró.")
+        st.stop()
+
+    cpi['Date'] = pd.to_datetime(cpi['Date'], format='%d/%m/%Y')
+    cpi.set_index('Date', inplace=True)
+    cpi['Cumulative_Inflation'] = (1 + cpi['CPI_MoM']).cumprod()
+    daily_cpi = cpi['Cumulative_Inflation'].resample('D').interpolate(method='linear')
+    return daily_cpi
+
+daily_cpi = load_cpi_data()
+
+# User Inputs
+st.title("Proyección del rendimiento de CEDEARs ajustados por inflación")
+start_date = st.date_input("Fecha de compra de CEDEARs (Inicio)", value=datetime(2024, 1, 1))
+end_date = st.date_input("Fecha de finalización de la predicción", value=datetime.now() + timedelta(days=365))
+future_dollar_rate = st.number_input("Predicción futura del tipo de cambio (USD/ARS)", value=800.0)
+future_inflation_rate = st.number_input("Tasa de inflación mensual estimada (%)", value=5.0) / 100
+growth_rate_underlying_asset = st.number_input("Tasa de crecimiento del activo subyacente (%)", value=10.0) / 100
+
+# Fetch stock data for the selected CEDEAR (e.g., SPY.BA) and underlying asset (e.g., SPY)
+ticker = st.text_input("Ingresar CEDEAR (por ejemplo, SPY.BA):", value="SPY.BA")
+underlying_ticker = st.text_input("Ingresar ticker del activo subyacente (por ejemplo, SPY):", value="SPY")
+
+# Fetch data from yfinance
+@st.cache_data
+def get_stock_data(ticker, start_date, end_date):
+    df = yf.download(ticker, start=start_date, end=end_date)
+    return df['Adj Close']
+
+# Fetch data for stock and underlying asset
+stock_data = get_stock_data(ticker, start_date, end_date)
+underlying_data = get_stock_data(underlying_ticker, start_date, end_date)
+
+# Adjust for splits (using the imported function)
+adjusted_stock_data = ajustar_precios_por_splits(stock_data, ticker)
+
+# Future Projections
+predicted_dates = pd.date_range(start=datetime.now(), end=end_date, freq='D')
+predicted_stock_prices = []
+
+# Initial values
+initial_stock_price = adjusted_stock_data.iloc[-1]
+initial_underlying_price = underlying_data.iloc[-1]
+
+# Project future prices
+for i, date in enumerate(predicted_dates):
+    # Adjust for growth of the underlying asset and inflation
+    future_price_underlying = initial_underlying_price * (1 + growth_rate_underlying_asset) ** (i / 365)
+    projected_stock_price = future_price_underlying * future_dollar_rate
+    inflation_adjustment = (1 + future_inflation_rate) ** (i / 30)  # Monthly inflation adjustment
+    adjusted_stock_price = projected_stock_price / inflation_adjustment
+    predicted_stock_prices.append(adjusted_stock_price)
+
+# Create DataFrame for projected data
+projection_df = pd.DataFrame({
+    'Date': predicted_dates,
+    'Projected Stock Price': predicted_stock_prices
+})
+
+# Plotting the results
+fig = go.Figure()
+
+# Add line for stock prices
+fig.add_trace(go.Scatter(
+    x=projection_df['Date'],
+    y=projection_df['Projected Stock Price'],
+    mode='lines',
+    name='Predicted CEDEAR Price (Adjusted for Inflation)'
+))
+
+# Add inflation adjustment
+inflation_values = [1 / ((1 + future_inflation_rate) ** (i / 30)) for i in range(len(predicted_dates))]
+fig.add_trace(go.Scatter(
+    x=projection_df['Date'],
+    y=inflation_values,
+    mode='lines',
+    name='Inflation-Adjusted Reference'
+))
+
+# Layout
+fig.update_layout(
+    title="Proyección del precio ajustado por inflación del CEDEAR",
+    xaxis_title="Fecha",
+    yaxis_title="Precio Ajustado (ARS)",
+    legend_title="Leyenda",
+)
+
+st.plotly_chart(fig)
