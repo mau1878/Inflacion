@@ -11,7 +11,7 @@ st.set_page_config(
   layout="wide"
 )
 
-# Now import modules that should not execute Streamlit commands at import time
+# Importing the split adjustment function
 from inflacion import ajustar_precios_por_splits  # Ensure this module is clean
 
 # Title of the app
@@ -115,10 +115,14 @@ underlying_ticker = st.sidebar.text_input(
 # Function to fetch stock data with caching
 @st.cache_data(show_spinner=False)
 def get_stock_data(ticker, start, end):
-  df = yf.download(ticker, start=start, end=end)
-  if df.empty:
+  try:
+      df = yf.download(ticker, start=start, end=end)
+      if df.empty:
+          return None
+      return df['Adj Close']
+  except Exception as e:
+      st.error(f"Error al descargar datos para {ticker}: {e}")
       return None
-  return df['Adj Close']
 
 # Fetch stock data for CEDEAR and the underlying asset
 with st.spinner("Descargando datos de CEDEAR..."):
@@ -173,6 +177,7 @@ with st.spinner("Calculando la tasa de cambio actual..."):
       st.error("No hay fechas coincidentes entre YPFD.BA y YPF para calcular la tasa de cambio.")
       st.stop()
 
+  # Calculate the current exchange rate
   current_exchange_rate = ypf_ba_data.loc[common_dates].iloc[-1] / ypf_data.loc[common_dates].iloc[-1]
 
 # Future Projections: Prediction of future stock prices and inflation adjustments
@@ -209,6 +214,14 @@ projection_df = pd.DataFrame({
   'Projected Stock Price (ARS)': inflation_adjusted_prices
 })
 
+# Compute Projected Cumulative Inflation for Plotting
+# Starting from the last historical adjusted price
+last_adjusted_price = adjusted_stock_data.iloc[-1]
+cumulative_inflation_projected = (1 + daily_inflation_rate) ** np.arange(num_days)
+inflation_line_projected = last_adjusted_price * cumulative_inflation_projected
+
+projection_df['Inflación Cumulativa'] = inflation_line_projected
+
 # Plotting the historical and future projections
 fig = go.Figure()
 
@@ -230,13 +243,10 @@ fig.add_trace(go.Scatter(
   line=dict(color='orange', dash='dash')
 ))
 
-# Inflation line for reference (Cumulative Inflation)
-inflation_line = daily_cpi.reindex(projection_df['Date'], method='nearest')
-inflation_line = inflation_line / inflation_line.iloc[0] * adjusted_stock_data.iloc[-1]  # Scale to the last historical price
-
+# Projected cumulative inflation
 fig.add_trace(go.Scatter(
   x=projection_df['Date'],
-  y=inflation_line,
+  y=projection_df['Inflación Cumulativa'],
   mode='lines',
   name='Inflación Cumulativa',
   line=dict(color='red', dash='dot')
