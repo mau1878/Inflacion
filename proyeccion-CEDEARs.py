@@ -7,8 +7,8 @@ import numpy as np
 
 # **Importante:** `st.set_page_config` debe ser el primer comando de Streamlit
 st.set_page_config(
-  page_title="Proyección de CEDEARs Ajustados por Inflación",
-  layout="wide"
+page_title="Proyección de CEDEARs Ajustados por Inflación",
+layout="wide"
 )
 
 # Importación de la función de ajuste de splits
@@ -62,56 +62,59 @@ start_date_default = datetime(2022, 1, 1)
 end_date_default = datetime.now() + timedelta(days=365)
 
 start_date = st.sidebar.date_input(
-  "Fecha de compra de CEDEARs (Inicio)",
-  value=start_date_default,
-  min_value=datetime(2000, 1, 1),
-  max_value=datetime.now()
+"Fecha de compra de CEDEARs (Inicio)",
+value=start_date_default,
+min_value=datetime(2000, 1, 1),
+max_value=datetime.now().date()  # Asegúrate de que sea un objeto date
 )
 
 end_date = st.sidebar.date_input(
-  "Fecha de finalización de la predicción",
-  value=end_date_default,
-  min_value=start_date + timedelta(days=1)
+"Fecha de finalización de la predicción",
+value=end_date_default.date(),
+min_value=start_date + timedelta(days=1)
 )
 
 if end_date <= start_date:
   st.sidebar.error("La fecha de finalización debe ser posterior a la fecha de inicio.")
   st.stop()
 
+# Convertir end_date a pd.Timestamp
+end_date_ts = pd.Timestamp(end_date)
+
 # Entrada para tipo de cambio futuro
 future_dollar_rate = st.sidebar.number_input(
-  "Predicción futura del tipo de cambio (USD/ARS)",
-  min_value=0.0,
-  value=800.0,
-  step=10.0
+"Predicción futura del tipo de cambio (USD/ARS)",
+min_value=0.0,
+value=800.0,
+step=10.0
 )
 
 # Entrada para tasa de inflación futura
 future_inflation_rate = st.sidebar.number_input(
-  "Tasa de inflación mensual estimada (%)",
-  min_value=0.0,
-  max_value=100.0,
-  value=5.0,
-  step=0.1
+"Tasa de inflación mensual estimada (%)",
+min_value=0.0,
+max_value=100.0,
+value=5.0,
+step=0.1
 ) / 100
 
 # Entrada para tasa de crecimiento del activo subyacente
 growth_rate_underlying_asset = st.sidebar.number_input(
-  "Tasa de crecimiento anual del activo subyacente (%)",
-  min_value=-100.0,
-  value=10.0,
-  step=0.1
+"Tasa de crecimiento anual del activo subyacente (%)",
+min_value=-100.0,
+value=10.0,
+step=0.1
 ) / 100
 
 # Entradas para tickers de CEDEAR y activo subyacente
 ticker = st.sidebar.text_input(
-  "Ingresar CEDEAR (por ejemplo, SPY.BA):",
-  value="SPY.BA"
+"Ingresar CEDEAR (por ejemplo, SPY.BA):",
+value="SPY.BA"
 ).upper()
 
 underlying_ticker = st.sidebar.text_input(
-  "Ingresar ticker del activo subyacente (por ejemplo, SPY):",
-  value="SPY"
+"Ingresar ticker del activo subyacente (por ejemplo, SPY):",
+value="SPY"
 ).upper()
 
 # ### Simulaciones de Tipo de Cambio
@@ -119,19 +122,19 @@ st.sidebar.subheader("Simulaciones de Tipo de Cambio (USD/ARS)")
 
 # Eventos de tipo de cambio por defecto
 default_exchange_events = [
-  {"Fecha": datetime(2024, 6, 1), "USD/ARS": 750.0},
-  {"Fecha": datetime(2024, 12, 1), "USD/ARS": 850.0},
+{"Fecha": datetime(2024, 6, 1).date(), "USD/ARS": 750.0},
+{"Fecha": datetime(2024, 12, 1).date(), "USD/ARS": 850.0},
 ]
 
 # Editor de datos para eventos de tipo de cambio
 exchange_events = st.sidebar.data_editor(
-  default_exchange_events,
-  column_config={
-      "Fecha": st.column_config.DateColumn("Fecha de Evento"),
-      "USD/ARS": st.column_config.NumberColumn("Tipo de Cambio (USD/ARS)", format="%.2f"),
-  },
-  num_rows="dynamic",
-  use_container_width=True
+default_exchange_events,
+column_config={
+    "Fecha": st.column_config.DateColumn("Fecha de Evento"),
+    "USD/ARS": st.column_config.NumberColumn("Tipo de Cambio (USD/ARS)", format="%.2f"),
+},
+num_rows="dynamic",
+use_container_width=True
 )
 
 # ### Función para descargar datos de stock con caché
@@ -206,8 +209,8 @@ def compute_projected_exchange_rates(start_date, end_date, current_rate, future_
   Calcular la serie de tasas de cambio USD/ARS proyectadas, incorporando eventos definidos por el usuario.
 
   Parámetros:
-  - start_date (datetime): Inicio del período de proyección.
-  - end_date (datetime): Fin del período de proyección.
+  - start_date (pd.Timestamp): Inicio del período de proyección.
+  - end_date (pd.Timestamp): Fin del período de proyección.
   - current_rate (float): Tasa de cambio actual.
   - future_rate (float): Tasa de cambio futura al final del período.
   - exchange_events (list of dict): Lista de {'Fecha': date, 'USD/ARS': rate}
@@ -253,19 +256,20 @@ def compute_projected_exchange_rates(start_date, end_date, current_rate, future_
   return exchange_rate_series
 
 # Asignar projection_start_date por separado para evitar errores de sintaxis
-projection_start_date = datetime.now()
+# Convertir projection_start_date a pd.Timestamp
+projection_start_date = pd.Timestamp(datetime.now())
 
 # Calcular las tasas de cambio proyectadas
 projected_exchange_rates = compute_projected_exchange_rates(
   start_date=projection_start_date,
-  end_date=end_date,
+  end_date=end_date_ts,  # Usar la versión convertida a pd.Timestamp
   current_rate=current_exchange_rate,
   future_rate=future_dollar_rate,
   exchange_events=exchange_events  # Pasar directamente la lista de diccionarios
 )
 
 # ### Proyecciones Futuras: Precio ajustado por inflación y desempeño esperado
-predicted_dates = pd.date_range(start=projection_start_date, end=end_date, freq='D')
+predicted_dates = pd.date_range(start=projection_start_date, end=end_date_ts, freq='D')
 num_days = len(predicted_dates)
 
 if num_days == 0:
@@ -393,12 +397,12 @@ performance_expected = (final_expected_price / initial_ce_dear_price - 1) * 100
 
 # Mostrar métricas para la proyección que sigue la inflación
 st.write(f"**Precio inicial ajustado:** ${initial_ce_dear_price:,.2f} ARS")
-st.write(f"**Precio proyectado ajustado al {end_date.strftime('%d/%m/%Y')} (Sigue Inflación):** ${final_inflacion_price:,.2f} ARS")
+st.write(f"**Precio proyectado ajustado al {end_date_ts.strftime('%d/%m/%Y')} (Sigue Inflación):** ${final_inflacion_price:,.2f} ARS")
 st.write(f"**Rendimiento proyectado ajustado por inflación (Sigue Inflación):** {performance_inflacion:.2f}%")
 st.write("---")  # Línea horizontal para separación
 
 # Mostrar métricas para la proyección basada en desempeño esperado
-st.write(f"**Precio proyectado ajustado al {end_date.strftime('%d/%m/%Y')} (Esperado):** ${final_expected_price:,.2f} ARS")
+st.write(f"**Precio proyectado ajustado al {end_date_ts.strftime('%d/%m/%Y')} (Esperado):** ${final_expected_price:,.2f} ARS")
 st.write(f"**Rendimiento proyectado ajustado por inflación (Esperado):** {performance_expected:.2f}%")
 
 # ### Tabla de Comparación de Proyecciones
