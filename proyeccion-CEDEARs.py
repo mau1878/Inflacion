@@ -292,13 +292,10 @@ def compute_projected_exchange_rates(start_date, end_date, current_rate, future_
   # Crear rango de fechas para proyección
   projection_dates = pd.date_range(start=start_date, end=end_date, freq='D')
 
-  # Reindexar a las fechas de proyección
-  exchange_rate_series = points_df['USD/ARS'].reindex(projection_dates)
+  # Reindexar a las fechas de proyección y aplicar interpolación lineal
+  exchange_rate_series = points_df['USD/ARS'].reindex(projection_dates).interpolate(method='linear')
 
-  # Interpolar linealmente para llenar los valores faltantes
-  exchange_rate_series = exchange_rate_series.interpolate(method='linear')
-
-  # Rellenar cualquier NaN restante (por ejemplo, antes del primer evento) con la tasa actual
+  # Rellenar cualquier NaN restante (si existiera) con la tasa actual
   exchange_rate_series.fillna(current_rate, inplace=True)
 
   return exchange_rate_series
@@ -337,10 +334,10 @@ def compute_projected_inflation_rates(start_date, end_date, inflation_events):
   # Crear rango de fechas para proyección
   projection_dates = pd.date_range(start=start_date, end=end_date, freq='D')
 
-  # Reindexar a las fechas de proyección y forward fill (mantener constante)
+  # Reindexar a las fechas de proyección y aplicar forward fill para mantener constante
   inflation_rate_series = points_df['Inflación (%)'].reindex(projection_dates, method='ffill')
 
-  # Rellenar cualquier NaN restante (por ejemplo, antes del primer evento) con la primera tasa disponible
+  # Rellenar cualquier NaN restante (si existiera) con la primera tasa disponible
   if not points_df.empty:
       first_rate = points_df['Inflación (%)'].iloc[0]
   else:
@@ -351,6 +348,18 @@ def compute_projected_inflation_rates(start_date, end_date, inflation_events):
   daily_inflation_rate = (1 + inflation_rate_series) ** (1 / 30) - 1
 
   return daily_inflation_rate
+
+# ### Determinar la Fecha de Inicio de la Proyección
+# Determinar la última fecha disponible en los datos históricos para iniciar la proyección
+last_historical_date = adjusted_stock_data.index.max()
+
+# Asignar projection_start_date como el día siguiente de la última fecha histórica
+projection_start_date = last_historical_date + pd.Timedelta(days=1)
+
+# Asegurarse de que projection_start_date no sea posterior a end_date
+if projection_start_date >= end_date:
+  st.error("La fecha de inicio de la proyección está después de la fecha de finalización.")
+  st.stop()
 
 # ### Calcular las tasas de cambio proyectadas
 projected_exchange_rates = compute_projected_exchange_rates(
