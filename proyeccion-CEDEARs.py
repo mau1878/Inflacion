@@ -250,39 +250,33 @@ def compute_projected_exchange_rates(start_date, end_date, current_rate, future_
   - pd.Series: Tasas de cambio diarias proyectadas desde start_date hasta end_date.
   """
   # Crear lista de puntos de tasa de cambio
-  points = []
-  # Punto de inicio
-  points.append({"Fecha": start_date, "USD/ARS": current_rate})
+  points = [
+      {"Fecha": start_date, "USD/ARS": current_rate},
+      {"Fecha": end_date, "USD/ARS": future_rate}
+  ]
+
   # Añadir eventos definidos por el usuario dentro del período de proyección
   for event in exchange_events:
-      event_date = pd.Timestamp(event["Fecha"])  # Convertir a Timestamp
+      event_date = pd.Timestamp(event["Fecha"])
       event_rate = event["USD/ARS"]
       if start_date < event_date < end_date:
           points.append({"Fecha": event_date, "USD/ARS": event_rate})
-  # Punto final
-  points.append({"Fecha": end_date, "USD/ARS": future_rate})
 
-  # Crear DataFrame
-  points_df = pd.DataFrame(points)
-  # Eliminar fechas duplicadas
-  points_df = points_df.drop_duplicates(subset="Fecha")
-  # Ordenar por Fecha
-  points_df = points_df.sort_values("Fecha")
+  # Crear DataFrame y ordenar por fecha
+  points_df = pd.DataFrame(points).drop_duplicates(subset="Fecha").sort_values("Fecha")
+  points_df.set_index("Fecha", inplace=True)
 
   # Crear rango de fechas para proyección
   projection_dates = pd.date_range(start=start_date, end=end_date, freq='D')
 
-  # Establecer 'Fecha' como índice
-  points_df.set_index("Fecha", inplace=True)
-
   # Reindexar a las fechas de proyección
-  exchange_rate_series = points_df['USD/ARS'].reindex(projection_dates, method='ffill')
+  exchange_rate_series = points_df['USD/ARS'].reindex(projection_dates)
 
   # Interpolar linealmente para llenar los valores faltantes
   exchange_rate_series = exchange_rate_series.interpolate(method='linear')
 
   # Rellenar cualquier NaN restante (por ejemplo, antes del primer evento) con la tasa actual
-  exchange_rate_series = exchange_rate_series.fillna(current_rate)
+  exchange_rate_series.fillna(current_rate, inplace=True)
 
   return exchange_rate_series
 
@@ -301,9 +295,10 @@ def compute_projected_inflation_rates(start_date, end_date, inflation_events):
   """
   # Crear lista de puntos de inflación
   points = []
+
   # Añadir eventos definidos por el usuario dentro del período de proyección
   for event in inflation_events:
-      event_date = pd.Timestamp(event["Fecha"])  # Convertir a Timestamp
+      event_date = pd.Timestamp(event["Fecha"])
       event_rate = event["Inflación (%)"] / 100  # Convertir a decimal
       if start_date <= event_date <= end_date:
           points.append({"Fecha": event_date, "Inflación (%)": event_rate})
@@ -312,28 +307,22 @@ def compute_projected_inflation_rates(start_date, end_date, inflation_events):
   if not points:
       points.append({"Fecha": start_date, "Inflación (%)": 0.05})  # 5% por defecto
 
-  # Crear DataFrame
-  points_df = pd.DataFrame(points)
-  # Eliminar fechas duplicadas
-  points_df = points_df.drop_duplicates(subset="Fecha")
-  # Ordenar por Fecha
-  points_df = points_df.sort_values("Fecha")
+  # Crear DataFrame y ordenar por fecha
+  points_df = pd.DataFrame(points).drop_duplicates(subset="Fecha").sort_values("Fecha")
+  points_df.set_index("Fecha", inplace=True)
 
   # Crear rango de fechas para proyección
   projection_dates = pd.date_range(start=start_date, end=end_date, freq='D')
 
-  # Establecer 'Fecha' como índice
-  points_df.set_index("Fecha", inplace=True)
-
-  # Reindexar a las fechas de proyección con dirección forward fill
+  # Reindexar a las fechas de proyección y forward fill (mantener constante)
   inflation_rate_series = points_df['Inflación (%)'].reindex(projection_dates, method='ffill')
 
-  # Interpolar linealmente para llenar los valores faltantes
-  inflation_rate_series = inflation_rate_series.interpolate(method='linear')
-
   # Rellenar cualquier NaN restante (por ejemplo, antes del primer evento) con la primera tasa disponible
-  first_valid = points_df['Inflación (%)'].iloc[0] if not points_df.empty else 0.05
-  inflation_rate_series = inflation_rate_series.fillna(first_valid)
+  if not points_df.empty:
+      first_rate = points_df['Inflación (%)'].iloc[0]
+  else:
+      first_rate = 0.05  # 5% por defecto
+  inflation_rate_series.fillna(first_rate, inplace=True)
 
   # Convertir tasa mensual a tasa diaria
   daily_inflation_rate = (1 + inflation_rate_series) ** (1 / 30) - 1
@@ -446,36 +435,40 @@ st.subheader("Tasas de Inflación Proyectadas (Mensual)")
 inflation_rate_fig = go.Figure()
 
 # Tasa de inflación mensual proyectada
-monthly_inflation_rates = projected_daily_inflation_rates.add(1).pow(30).subtract(1) * 100  # Convert back to monthly rate %
+monthly_inflation_rates = projected_daily_inflation_rates.resample('M').agg(lambda x: (1 + x).prod() - 1).multiply(100)  # Convert to percentage
 
 inflation_rate_fig.add_trace(go.Scatter(
   x=monthly_inflation_rates.index,
   y=monthly_inflation_rates,
-  mode='lines',
+  mode='lines+markers',
   name='Inflación Mensual Proyectada',
-  line=dict(color='green')
+  line=dict(color='green'),
+  marker=dict(size=6)
 ))
 
 # Marcar los eventos de inflación definidos por el usuario
 for event in included_inflation_events:
   event_date = event["Fecha"]
-  # Asegurar que el evento_date está en monthly_inflation_rates
-  if event_date in monthly_inflation_rates.index:
+  # Align event date to the month
+  event_month = event_date.replace(day=1)
+  if event_month in monthly_inflation_rates.index:
       inflation_rate_fig.add_shape(
           type="line",
-          x0=event_date,
+          x0=event_month,
           y0=monthly_inflation_rates.min(),
-          x1=event_date,
+          x1=event_month,
           y1=monthly_inflation_rates.max(),
           line=dict(color="Orange", dash="dash"),
       )
       inflation_rate_fig.add_annotation(
-          x=event_date,
-          y=monthly_inflation_rates[event_date],
+          x=event_month,
+          y=monthly_inflation_rates[event_month],
           text=f"{event['Inflación (%)']}%",
           showarrow=True,
           arrowhead=1,
-          yanchor="bottom"
+          yanchor="bottom",
+          xanchor="left",
+          bgcolor="white"
       )
 
 inflation_rate_fig.update_layout(
@@ -500,7 +493,7 @@ if num_days == 0:
 projected_exchange_rates = projected_exchange_rates.reindex(predicted_dates, method='nearest', fill_value=current_exchange_rate)
 
 # Asegurar que projected_daily_inflation_rates cubre todas las fechas de predicción
-projected_daily_inflation_rates = projected_daily_inflation_rates.reindex(predicted_dates, method='nearest', fill_value=0.05)  # Default 5% if not covered
+projected_daily_inflation_rates = projected_daily_inflation_rates.reindex(predicted_dates, method='ffill')
 
 # Precios iniciales para iniciar la proyección
 initial_underlying_price = underlying_data.iloc[-1]  # Último precio disponible del activo subyacente
@@ -609,6 +602,17 @@ fig2.update_layout(
 
 # Mostrar el segundo gráfico interactivo
 st.plotly_chart(fig2, use_container_width=True)
+
+# ### Diagnóstico de Tasas de Cambio Proyectadas
+st.subheader("Ejemplo de Tasas de Cambio Proyectadas")
+
+st.write("Muestra de las tasas de cambio USD/ARS proyectadas:")
+st.write(projected_exchange_rates.head(30))  # Muestra los primeros 30 días
+
+# ### Diagnóstico de Tasas de Inflación Proyectadas
+st.subheader("Ejemplo de Tasas de Inflación Proyectadas")
+st.write("Muestra de las tasas de inflación diarias proyectadas (convertidas a mensual):")
+st.write(monthly_inflation_rates.head(12))  # Muestra los primeros 12 meses
 
 # ### Resumen de la Proyección
 st.subheader("Resumen de Proyección")
