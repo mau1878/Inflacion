@@ -107,8 +107,8 @@ with st.sidebar.form("projection_form"):
   
   # Eventos de tipo de cambio por defecto con fechas como pd.Timestamp
   default_exchange_events = [
-      {"Fecha": pd.Timestamp("2024-06-01"), "USD/ARS": 750.0},
-      {"Fecha": pd.Timestamp("2024-12-01"), "USD/ARS": 850.0},
+      {"Fecha": datetime(2024, 6, 1), "USD/ARS": 750.0},
+      {"Fecha": datetime(2024, 12, 1), "USD/ARS": 850.0},
   ]
   
   # Editor de datos para eventos de tipo de cambio
@@ -162,19 +162,23 @@ if 'projections' not in st.session_state:
   }
 
 if submitted:
-  # Actualizar los parámetros en session_state
-  st.session_state.projections['start_date'] = pd.to_datetime(start_date_input)
-  st.session_state.projections['end_date'] = pd.to_datetime(end_date_input)
-  st.session_state.projections['future_dollar_rate'] = future_dollar_rate_input
-  st.session_state.projections['growth_rate_underlying_asset'] = growth_rate_underlying_asset_input
-  st.session_state.projections['ticker'] = ticker_input
-  st.session_state.projections['underlying_ticker'] = underlying_ticker_input
-  st.session_state.projections['exchange_events'] = [
-      {"Fecha": pd.to_datetime(event["Fecha"]), "USD/ARS": event["USD/ARS"]} for event in exchange_events_input
-  ]
-  st.session_state.projections['inflation_events'] = [
-      {"Fecha": pd.to_datetime(event["Fecha"]), "Inflación (%)": event["Inflación (%)"]} for event in inflation_events_input
-  ]
+  # Validación de fechas
+  if end_date_input <= start_date_input:
+      st.sidebar.error("La fecha de finalización debe ser posterior a la fecha de inicio.")
+  else:
+      # Actualizar los parámetros en session_state
+      st.session_state.projections['start_date'] = pd.to_datetime(start_date_input)
+      st.session_state.projections['end_date'] = pd.to_datetime(end_date_input)
+      st.session_state.projections['future_dollar_rate'] = future_dollar_rate_input
+      st.session_state.projections['growth_rate_underlying_asset'] = growth_rate_underlying_asset_input
+      st.session_state.projections['ticker'] = ticker_input
+      st.session_state.projections['underlying_ticker'] = underlying_ticker_input
+      st.session_state.projections['exchange_events'] = [
+          {"Fecha": pd.to_datetime(event["Fecha"]), "USD/ARS": event["USD/ARS"]} for event in exchange_events_input
+      ]
+      st.session_state.projections['inflation_events'] = [
+          {"Fecha": pd.to_datetime(event["Fecha"]), "Inflación (%)": event["Inflación (%)"]} for event in inflation_events_input
+      ]
 
 # Asignar variables desde session_state
 projections = st.session_state.projections
@@ -200,10 +204,10 @@ def get_stock_data(ticker, start, end):
       return None
 
 # Descargar datos de CEDEAR y activo subyacente
-with st.spinner("Descargando datos de CEDEAR..."):
+with st.spinner(f"Descargando datos de {ticker}..."):
   stock_data = get_stock_data(ticker, start_date, end_date)
 
-with st.spinner("Descargando datos del activo subyacente..."):
+with st.spinner(f"Descargando datos de {underlying_ticker}..."):
   underlying_data = get_stock_data(underlying_ticker, start_date, end_date)
 
 # Validación de datos descargados
@@ -348,18 +352,6 @@ def compute_projected_inflation_rates(start_date, end_date, inflation_events):
 
   return daily_inflation_rate
 
-# ### Determinar la Fecha de Inicio de la Proyección
-# Determinar la última fecha disponible en los datos históricos para iniciar la proyección
-last_historical_date = adjusted_stock_data.index.max()
-
-# Asignar projection_start_date como el día siguiente de la última fecha histórica
-projection_start_date = last_historical_date + pd.Timedelta(days=1)
-
-# Asegurarse de que projection_start_date no sea posterior a end_date
-if projection_start_date >= end_date:
-  st.error("La fecha de inicio de la proyección está después de la fecha de finalización.")
-  st.stop()
-
 # ### Calcular las tasas de cambio proyectadas
 projected_exchange_rates = compute_projected_exchange_rates(
   start_date=projection_start_date,
@@ -453,8 +445,8 @@ st.subheader("Tasas de Inflación Proyectadas (Mensual)")
 
 inflation_rate_fig = go.Figure()
 
-# Tasa de inflación mensual proyectada usando resample con forward fill
-monthly_inflation_rates = projected_daily_inflation_rates.resample('M').apply(lambda x: (1 + x).prod() - 1).multiply(100)  # Convert to percentage
+# Tasa de inflación mensual proyectada utilizando resample con frecuencia 'ME' (Month End)
+monthly_inflation_rates = projected_daily_inflation_rates.resample('ME').apply(lambda x: (1 + x).prod() - 1).multiply(100)  # Convert to percentage
 
 inflation_rate_fig.add_trace(go.Scatter(
   x=monthly_inflation_rates.index,
@@ -468,8 +460,8 @@ inflation_rate_fig.add_trace(go.Scatter(
 # Marcar los eventos de inflación definidos por el usuario
 for event in included_inflation_events:
   event_date = event["Fecha"]
-  # Align event date to the month
-  event_month = event_date.replace(day=1)
+  # Align event date to the month end
+  event_month = event_date + pd.offsets.MonthEnd(0)
   if event_month in monthly_inflation_rates.index:
       inflation_rate_fig.add_shape(
           type="line",
@@ -520,7 +512,7 @@ if num_days == 0:
   st.stop()
 
 # Asegurar que projected_exchange_rates cubre todas las fechas de predicción
-projected_exchange_rates = projected_exchange_rates.reindex(predicted_dates, method='linear').fillna(current_exchange_rate)
+projected_exchange_rates = projected_exchange_rates.reindex(predicted_dates).interpolate(method='linear').fillna(current_exchange_rate)
 
 # Asegurar que projected_daily_inflation_rates cubre todas las fechas de predicción
 projected_daily_inflation_rates = projected_daily_inflation_rates.reindex(predicted_dates, method='ffill').fillna(0.05)  # Default 5% if not covered
