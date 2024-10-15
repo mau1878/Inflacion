@@ -265,11 +265,19 @@ def compute_projected_exchange_rates(start_date, end_date, current_rate, start_r
       event_date = pd.Timestamp(event["Fecha"])
       event_rate = event["USD/ARS"]
       if start_date <= event_date <= end_date:
-          exchange_rate_series.loc[event_date:] = event_rate  # Cambiar la tasa desde el evento en adelante
-
-  # Opcional: Suavizar después de los eventos si se desea
+          # Asegurarse de que la fecha del evento esté dentro del rango de proyección
+          if event_date in exchange_rate_series.index:
+              exchange_rate_series.loc[event_date] = event_rate
+          else:
+              # Si por alguna razón el event_date no está en el índice, agregarlo
+              exchange_rate_series = exchange_rate_series.append(pd.Series([event_rate], index=[event_date]))
+  
+  # Reordenar el índice después de posibles inserciones
+  exchange_rate_series = exchange_rate_series.sort_index()
+  
+  # Interpolar para llenar cualquier valor faltante debido a la inserción de eventos
   exchange_rate_series = exchange_rate_series.interpolate(method='quadratic')
-
+  
   return exchange_rate_series
 
 # ### Determinar la Fecha de Inicio de la Proyección
@@ -373,11 +381,14 @@ inflation_monthly_progression = create_progressive_series(start_inflation_rate, 
 inflation_daily_rates = (1 + inflation_monthly_progression) ** (1 / 30) - 1  # Convertir a tasa diaria
 
 # Calcular la inflación acumulada progresiva
-inflacion_following_prices = initial_ce_dear_price * (1 + inflation_daily_rates).cumprod()
+# Convertir a Pandas Series para mantener el índice de fechas
+inflacion_following_prices = pd.Series(initial_ce_dear_price * (1 + inflation_daily_rates).cumprod(), index=predicted_dates)
 
 # **Proyección basada en desempeño esperado**
 
-# Crear una progresión no lineal para la tasa de crecimiento del activo subyacente
+# La tasa de crecimiento del activo subyacente ya se define como una tasa diaria
+# Crear una progresión no lineal para la tasa de crecimiento del activo subyacente si es necesario
+# En este caso, mantendremos la tasa diaria constante
 daily_growth_rate = (1 + growth_rate_underlying_asset) ** (1 / 365) - 1
 future_prices_underlying = initial_underlying_price * (1 + daily_growth_rate) ** np.arange(num_days)
 
@@ -387,7 +398,7 @@ expected_performance_prices = (future_prices_underlying / conversion_ratio) * pr
 # Crear DataFrame para las proyecciones
 projection_df = pd.DataFrame({
   'Date': predicted_dates,
-  'CEDEAR Sigue Inflación': inflacion_following_prices.values,
+  'CEDEAR Sigue Inflación': inflacion_following_prices,  # Removed .values
   'CEDEAR Esperado': expected_performance_prices
 })
 
