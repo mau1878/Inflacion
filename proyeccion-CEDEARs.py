@@ -5,7 +5,7 @@ import yfinance as yf
 import plotly.graph_objs as go
 import numpy as np
 
-# **Importante:** `st.set_page_config` debe ser el primer comando de Streamlit
+# **Important:** `st.set_page_config` must be the first Streamlit command
 st.set_page_config(
   page_title="Proyección de CEDEARs Ajustados por Inflación",
   layout="wide"
@@ -71,7 +71,7 @@ start_date = st.sidebar.date_input(
 end_date = st.sidebar.date_input(
   "Fecha de finalización de la predicción",
   value=end_date_default.date(),
-  min_value=start_date + timedelta(days=1)
+  min_value=(start_date + timedelta(days=1))
 )
 
 if end_date <= start_date:
@@ -81,22 +81,41 @@ if end_date <= start_date:
 # Convertir end_date a pd.Timestamp
 end_date_ts = pd.Timestamp(end_date)
 
-# Entrada para tipo de cambio futuro
-future_dollar_rate = st.sidebar.number_input(
-  "Predicción futura del tipo de cambio (USD/ARS)",
+# **Overhaul: Añadiendo Entradas para Start y End Inflation Rates y Exchange Rates**
+
+st.sidebar.markdown("### Progresión de Inflación y Tipo de Cambio")
+
+# Entradas para tasa de inflación mensual inicial y final
+start_inflation_rate = st.sidebar.number_input(
+  "Tasa de inflación mensual inicial (%)",
   min_value=0.0,
-  value=800.0,
+  max_value=100.0,
+  value=3.0,
+  step=0.1
+) / 100  # Convertir a decimal
+
+end_inflation_rate = st.sidebar.number_input(
+  "Tasa de inflación mensual final (%)",
+  min_value=0.0,
+  max_value=100.0,
+  value=7.0,
+  step=0.1
+) / 100  # Convertir a decimal
+
+# Entradas para tipo de cambio inicial y final
+start_exchange_rate = st.sidebar.number_input(
+  "Tipo de cambio inicial (USD/ARS)",
+  min_value=0.0,
+  value=700.0,
   step=10.0
 )
 
-# Entrada para tasa de inflación futura
-future_inflation_rate = st.sidebar.number_input(
-  "Tasa de inflación mensual estimada (%)",
+end_exchange_rate = st.sidebar.number_input(
+  "Tipo de cambio final (USD/ARS)",
   min_value=0.0,
-  max_value=100.0,
-  value=5.0,
-  step=0.1
-) / 100
+  value=900.0,
+  step=10.0
+)
 
 # Entrada para tasa de crecimiento del activo subyacente
 growth_rate_underlying_asset = st.sidebar.number_input(
@@ -140,6 +159,16 @@ exchange_events = st.sidebar.data_editor(
 # Convertir todas las fechas a pd.Timestamp para consistencia
 for event in exchange_events:
   event["Fecha"] = pd.Timestamp(event["Fecha"])
+
+# ### Función para crear una progresión no lineal (ej. cuadrática)
+def create_progressive_series(start_value, end_value, num_steps):
+  """
+  Crea una serie de valores que progresa de start_value a end_value de manera no lineal (cuadrática).
+  """
+  x = np.linspace(0, 1, num_steps)
+  # Aquí puedes modificar la fórmula para cambiar la progresión
+  progression = start_value + (end_value - start_value) * (x ** 2)  # Progresión cuadrática
+  return progression
 
 # ### Función para descargar datos de stock con caché
 @st.cache_data(show_spinner=False)
@@ -207,55 +236,39 @@ with st.spinner("Calculando la tasa de cambio actual..."):
   # Calcular la tasa de cambio actual
   current_exchange_rate = ypf_ba_data.loc[common_dates].iloc[-1] / ypf_data.loc[common_dates].iloc[-1]
 
-# ### Función para calcular tasa de cambio proyectada con eventos de usuario
-def compute_projected_exchange_rates(start_date, end_date, current_rate, future_rate, exchange_events):
+# ### Función para calcular tasa de cambio proyectada con eventos de usuario y progresión
+def compute_projected_exchange_rates(start_date, end_date, current_rate, start_rate, end_rate, exchange_events):
   """
-  Calcular la serie de tasas de cambio USD/ARS proyectadas, incorporando eventos definidos por el usuario.
+  Calcular la serie de tasas de cambio USD/ARS proyectadas, incorporando eventos definidos por el usuario
+  y una progresión no lineal de start_rate a end_rate.
 
   Parámetros:
   - start_date (pd.Timestamp): Inicio del período de proyección.
   - end_date (pd.Timestamp): Fin del período de proyección.
   - current_rate (float): Tasa de cambio actual.
-  - future_rate (float): Tasa de cambio futura al final del período.
+  - start_rate (float): Tasa de cambio inicial en la proyección.
+  - end_rate (float): Tasa de cambio final en la proyección.
   - exchange_events (list of dict): Lista de {'Fecha': pd.Timestamp, 'USD/ARS': rate}
 
   Retorna:
   - pd.Series: Tasas de cambio diarias proyectadas desde start_date hasta end_date.
   """
-  # Crear lista de puntos de tasa de cambio
-  points = []
-  # Punto de inicio
-  points.append({"Fecha": start_date, "USD/ARS": current_rate})
-  # Añadir eventos definidos por el usuario dentro del período de proyección
-  for event in exchange_events:
-      event_date = pd.Timestamp(event["Fecha"])  # Convertir a Timestamp
-      event_rate = event["USD/ARS"]
-      if start_date < event_date < end_date:
-          points.append({"Fecha": event_date, "USD/ARS": event_rate})
-  # Punto final
-  points.append({"Fecha": end_date, "USD/ARS": future_rate})
-
-  # Crear DataFrame
-  points_df = pd.DataFrame(points)
-  # Eliminar fechas duplicadas
-  points_df = points_df.drop_duplicates(subset="Fecha")
-  # Ordenar por Fecha
-  points_df = points_df.sort_values("Fecha")
-
-  # Crear rango de fechas para proyección
   projection_dates = pd.date_range(start=start_date, end=end_date, freq='D')
+  num_days = len(projection_dates)
+  
+  # Crear progresión no lineal para la tasa de cambio base
+  base_rates = create_progressive_series(start_rate, end_rate, num_days)
+  exchange_rate_series = pd.Series(base_rates, index=projection_dates)
 
-  # Establecer 'Fecha' como índice
-  points_df.set_index("Fecha", inplace=True)
+  # Incorporar eventos de tipo de cambio
+  for event in exchange_events:
+      event_date = pd.Timestamp(event["Fecha"])
+      event_rate = event["USD/ARS"]
+      if start_date <= event_date <= end_date:
+          exchange_rate_series.loc[event_date:] = event_rate  # Cambiar la tasa desde el evento en adelante
 
-  # Reindexar a las fechas de proyección
-  exchange_rate_series = points_df['USD/ARS'].reindex(projection_dates, method=None)
-
-  # Interpolar linealmente para llenar los valores faltantes
-  exchange_rate_series = exchange_rate_series.interpolate(method='linear')
-
-  # Rellenar cualquier NaN restante (por ejemplo, antes del primer evento) con la tasa actual
-  exchange_rate_series = exchange_rate_series.fillna(current_rate)
+  # Opcional: Suavizar después de los eventos si se desea
+  exchange_rate_series = exchange_rate_series.interpolate(method='quadratic')
 
   return exchange_rate_series
 
@@ -271,12 +284,13 @@ if projection_start_date >= end_date_ts:
   st.error("La fecha de inicio de la proyección está después de la fecha de finalización.")
   st.stop()
 
-# ### Calcular las tasas de cambio proyectadas
+# ### Calcular las tasas de cambio proyectadas con progresión
 projected_exchange_rates = compute_projected_exchange_rates(
   start_date=projection_start_date,
   end_date=end_date_ts,
   current_rate=current_exchange_rate,
-  future_rate=future_dollar_rate,
+  start_rate=start_exchange_rate,
+  end_rate=end_exchange_rate,
   exchange_events=exchange_events  # Pasar directamente la lista de diccionarios
 )
 
@@ -285,7 +299,7 @@ st.subheader("Eventos de Tipo de Cambio Incluidos en la Proyección")
 
 included_events = [
   event for event in exchange_events
-  if projection_start_date < pd.Timestamp(event["Fecha"]) < end_date_ts
+  if projection_start_date <= pd.Timestamp(event["Fecha"]) <= end_date_ts
 ]
 
 if included_events:
@@ -352,28 +366,28 @@ projected_exchange_rates = projected_exchange_rates.reindex(predicted_dates, met
 initial_underlying_price = underlying_data.iloc[-1]  # Último precio disponible del activo subyacente
 initial_ce_dear_price = adjusted_stock_data.iloc[-1]  # Último precio ajustado del CEDEAR
 
-# Calcular la tasa de crecimiento diaria basada en la tasa anual
+# **Overhaul: Calcular Progresión de Inflación desde Start a End**
+
+# Generar una serie progresiva de tasas de inflación diarias
+inflation_monthly_progression = create_progressive_series(start_inflation_rate, end_inflation_rate, num_days)
+inflation_daily_rates = (1 + inflation_monthly_progression) ** (1 / 30) - 1  # Convertir a tasa diaria
+
+# Calcular la inflación acumulada progresiva
+inflacion_following_prices = initial_ce_dear_price * (1 + inflation_daily_rates).cumprod()
+
+# **Proyección basada en desempeño esperado**
+
+# Crear una progresión no lineal para la tasa de crecimiento del activo subyacente
 daily_growth_rate = (1 + growth_rate_underlying_asset) ** (1 / 365) - 1
+future_prices_underlying = initial_underlying_price * (1 + daily_growth_rate) ** np.arange(num_days)
 
-# Calcular la tasa de inflación diaria basada en la tasa de inflación mensual
-daily_inflation_rate = (1 + future_inflation_rate) ** (1 / 30) - 1
-
-# Crear un array que representa los días transcurridos
-days_passed = np.arange(num_days)
-
-# **1. Proyección siguiendo la inflación**
-# Precio del CEDEAR aumentando exactamente con la inflación
-inflacion_following_prices = initial_ce_dear_price * (1 + daily_inflation_rate) ** days_passed
-
-# **2. Proyección basada en desempeño esperado**
-# Precio del CEDEAR basado en el crecimiento del activo subyacente y tasas de cambio proyectadas
-future_prices_underlying = initial_underlying_price * (1 + daily_growth_rate) ** days_passed
+# Calcular el precio esperado basado en el crecimiento del activo subyacente y tasas de cambio proyectadas
 expected_performance_prices = (future_prices_underlying / conversion_ratio) * projected_exchange_rates.values
 
 # Crear DataFrame para las proyecciones
 projection_df = pd.DataFrame({
   'Date': predicted_dates,
-  'CEDEAR Sigue Inflación': inflacion_following_prices,
+  'CEDEAR Sigue Inflación': inflacion_following_prices.values,
   'CEDEAR Esperado': expected_performance_prices
 })
 
@@ -460,7 +474,7 @@ st.plotly_chart(fig2, use_container_width=True)
 st.subheader("Resumen de Proyección")
 
 # Precios proyectados finales
-final_inflacion_price = inflacion_following_prices[-1]
+final_inflacion_price = inflacion_following_prices.iloc[-1]
 final_expected_price = expected_performance_prices[-1]
 
 # Cálculo de rendimiento porcentual
