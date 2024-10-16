@@ -90,7 +90,7 @@ start_inflation_rate = st.sidebar.number_input(
   "Tasa de inflación mensual inicial (%)",
   min_value=0.0,
   max_value=100.0,
-  value=3.0,
+  value=3.5,
   step=0.1
 ) / 100  # Convertir a decimal
 
@@ -98,9 +98,19 @@ end_inflation_rate = st.sidebar.number_input(
   "Tasa de inflación mensual final (%)",
   min_value=0.0,
   max_value=100.0,
-  value=7.0,
+  value=0.5,
   step=0.1
 ) / 100  # Convertir a decimal
+
+# Nuevo: Factor de aceleración para Inflación
+inflation_acceleration = st.sidebar.slider(
+  "Factor de aceleración para Inflación",
+  min_value=0.1,
+  max_value=3.0,
+  value=2.0,
+  step=0.1,
+  help="Controla la aceleración de la progresión de inflación. >1: acelera hacia el final, <1: decelera."
+)
 
 # Entradas para tipo de cambio inicial y final
 start_exchange_rate = st.sidebar.number_input(
@@ -115,6 +125,16 @@ end_exchange_rate = st.sidebar.number_input(
   min_value=0.0,
   value=900.0,
   step=10.0
+)
+
+# Nuevo: Factor de aceleración para Tipo de Cambio
+exchange_acceleration = st.sidebar.slider(
+  "Factor de aceleración para Tipo de Cambio",
+  min_value=0.1,
+  max_value=3.0,
+  value=2.0,
+  step=0.1,
+  help="Controla la aceleración de la progresión del tipo de cambio. >1: acelera hacia el final, <1: decelera."
 )
 
 # Entrada para tasa de crecimiento del activo subyacente
@@ -161,13 +181,25 @@ for event in exchange_events:
   event["Fecha"] = pd.Timestamp(event["Fecha"])
 
 # ### Función para crear una progresión no lineal (ej. cuadrática)
-def create_progressive_series(start_value, end_value, num_steps):
+def create_progressive_series(start_value, end_value, num_steps, acceleration=1.0):
   """
-  Crea una serie de valores que progresa de start_value a end_value de manera no lineal (cuadrática).
+  Crea una serie de valores que progresa de start_value a end_value de manera no lineal.
+  
+  Parámetros:
+  - start_value (float): Valor inicial.
+  - end_value (float): Valor final.
+  - num_steps (int): Número de pasos (días).
+  - acceleration (float): Factor de aceleración. >1 acelera hacia el final, <1 decelera.
+  
+  Retorna:
+  - numpy.ndarray: Serie progresiva de valores.
   """
+  if num_steps <= 1:
+      return np.array([start_value])
+
   x = np.linspace(0, 1, num_steps)
-  # Aquí puedes modificar la fórmula para cambiar la progresión
-  progression = start_value + (end_value - start_value) * (x ** 2)  # Progresión cuadrática
+  # Aplicar aceleración
+  progression = start_value + (end_value - start_value) * (x ** acceleration)
   return progression
 
 # ### Función para descargar datos de stock con caché
@@ -237,7 +269,7 @@ with st.spinner("Calculando la tasa de cambio actual..."):
   current_exchange_rate = ypf_ba_data.loc[common_dates].iloc[-1] / ypf_data.loc[common_dates].iloc[-1]
 
 # ### Función para calcular tasa de cambio proyectada con eventos de usuario y progresión
-def compute_projected_exchange_rates(start_date, end_date, current_rate, start_rate, end_rate, exchange_events):
+def compute_projected_exchange_rates(start_date, end_date, current_rate, start_rate, end_rate, exchange_events, acceleration=1.0):
   """
   Calcular la serie de tasas de cambio USD/ARS proyectadas, incorporando eventos definidos por el usuario
   y una progresión no lineal de start_rate a end_rate.
@@ -249,6 +281,7 @@ def compute_projected_exchange_rates(start_date, end_date, current_rate, start_r
   - start_rate (float): Tasa de cambio inicial en la proyección.
   - end_rate (float): Tasa de cambio final en la proyección.
   - exchange_events (list of dict): Lista de {'Fecha': pd.Timestamp, 'USD/ARS': rate}
+  - acceleration (float): Factor de aceleración para la progresión.
 
   Retorna:
   - pd.Series: Tasas de cambio diarias proyectadas desde start_date hasta end_date.
@@ -257,7 +290,7 @@ def compute_projected_exchange_rates(start_date, end_date, current_rate, start_r
   num_days = len(projection_dates)
   
   # Crear progresión no lineal para la tasa de cambio base
-  base_rates = create_progressive_series(start_rate, end_rate, num_days)
+  base_rates = create_progressive_series(start_rate, end_rate, num_days, acceleration=acceleration)
   exchange_rate_series = pd.Series(base_rates, index=projection_dates)
 
   # Incorporar eventos de tipo de cambio
@@ -292,14 +325,15 @@ if projection_start_date >= end_date_ts:
   st.error("La fecha de inicio de la proyección está después de la fecha de finalización.")
   st.stop()
 
-# ### Calcular las tasas de cambio proyectadas con progresión
+# ### Calcular las tasas de cambio proyectadas con progresión y aceleración
 projected_exchange_rates = compute_projected_exchange_rates(
   start_date=projection_start_date,
   end_date=end_date_ts,
   current_rate=current_exchange_rate,
   start_rate=start_exchange_rate,
   end_rate=end_exchange_rate,
-  exchange_events=exchange_events  # Pasar directamente la lista de diccionarios
+  exchange_events=exchange_events,  # Lista de diccionarios
+  acceleration=exchange_acceleration  # Nuevo parámetro
 )
 
 # ### Verificación de Eventos de Tipo de Cambio Incluidos
@@ -374,14 +408,18 @@ projected_exchange_rates = projected_exchange_rates.reindex(predicted_dates, met
 initial_underlying_price = underlying_data.iloc[-1]  # Último precio disponible del activo subyacente
 initial_ce_dear_price = adjusted_stock_data.iloc[-1]  # Último precio ajustado del CEDEAR
 
-# **Overhaul: Calcular Progresión de Inflación desde Start a End**
+# **Overhaul: Calcular Progresión de Inflación con Aceleración**
 
-# Generar una serie progresiva de tasas de inflación diarias
-inflation_monthly_progression = create_progressive_series(start_inflation_rate, end_inflation_rate, num_days)
+# Generar una serie progresiva de tasas de inflación diarias con aceleración
+inflation_monthly_progression = create_progressive_series(
+  start_inflation_rate,
+  end_inflation_rate,
+  num_days,
+  acceleration=inflation_acceleration
+)
 inflation_daily_rates = (1 + inflation_monthly_progression) ** (1 / 30) - 1  # Convertir a tasa diaria
 
 # Calcular la inflación acumulada progresiva
-# Convertir a Pandas Series para mantener el índice de fechas
 inflacion_following_prices = pd.Series(initial_ce_dear_price * (1 + inflation_daily_rates).cumprod(), index=predicted_dates)
 
 # **Proyección basada en desempeño esperado**
