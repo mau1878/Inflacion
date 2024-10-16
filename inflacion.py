@@ -266,11 +266,12 @@ if tickers_input:
 
           if show_percentage or show_percentage_from_recent:
               if show_percentage_from_recent:
-                  # Calculate percentages using the most recent value as the reference
-                  stock_data['Inflation_Adjusted_Percentage'] = (stock_data['Inflation_Adjusted_Close'] / stock_data['Inflation_Adjusted_Close'].iloc[-1] - 1) * 100
-                  
-                  # Invert the sign for past values
-                  stock_data['Inflation_Adjusted_Percentage'] = -stock_data['Inflation_Adjusted_Percentage']
+                # Calculate the percentage change from each past value to the most recent value
+                  stock_data['Inflation_Adjusted_Percentage'] = ((stock_data['Inflation_Adjusted_Close'].iloc[-1] / stock_data['Inflation_Adjusted_Close']) - 1) * 100
+                
+                # Cap the minimum value at -100%
+                  stock_data['Inflation_Adjusted_Percentage'] = stock_data['Inflation_Adjusted_Percentage'].clip(lower=-100)
+
               else:
                   # Calculate percentages using the initial value as the reference
                   stock_data['Inflation_Adjusted_Percentage'] = (stock_data['Inflation_Adjusted_Close'] / stock_data['Inflation_Adjusted_Close'].iloc[0] - 1) * 100
