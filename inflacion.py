@@ -268,6 +268,9 @@ if tickers_input:
               if show_percentage_from_recent:
                   # Calculate percentages using the most recent value as the reference
                   stock_data['Inflation_Adjusted_Percentage'] = (stock_data['Inflation_Adjusted_Close'] / stock_data['Inflation_Adjusted_Close'].iloc[-1] - 1) * 100
+                  
+                  # Invert the sign for past values
+                  stock_data['Inflation_Adjusted_Percentage'] = -stock_data['Inflation_Adjusted_Percentage']
               else:
                   # Calculate percentages using the initial value as the reference
                   stock_data['Inflation_Adjusted_Percentage'] = (stock_data['Inflation_Adjusted_Close'] / stock_data['Inflation_Adjusted_Close'].iloc[0] - 1) * 100
@@ -400,6 +403,8 @@ if tickers_input:
               if show_percentage_from_recent:
                   # Calculate percentages using the most recent value as the reference
                   custom_series_pct = (adjusted_series / adjusted_series.iloc[-1] - 1) * 100
+                  # Invert the sign for past values
+                  custom_series_pct = -custom_series_pct
               else:
                   # Calculate percentages using the initial value as the reference
                   custom_series_pct = (adjusted_series / adjusted_series.iloc[0] - 1) * 100
