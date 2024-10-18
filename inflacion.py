@@ -57,13 +57,13 @@ def ajustar_precios_por_splits(df, ticker):
               split_date = datetime(2023, 11, 3)
               df_before_split = df[df.index < split_date].copy()
               df_after_split = df[df.index >= split_date].copy()
-              df_before_split['Close'] /= adjustment[0]
-              df_after_split['Close'] *= adjustment[1]
+              df_before_split['Adj Close'] /= adjustment[0]
+              df_after_split['Adj Close'] *= adjustment[1]
               df = pd.concat([df_before_split, df_after_split]).sort_index()
           else:
               # Ajuste simple de split
               split_threshold_date = datetime(2024, 1, 23)
-              df.loc[df.index <= split_threshold_date, 'Close'] /= adjustment
+              df.loc[df.index <= split_threshold_date, 'Adj Close'] /= adjustment
       # Si no hay ajuste, no hacer nada
   except Exception as e:
       logger.error(f"Error ajustando splits para {ticker}: {e}")
@@ -254,14 +254,14 @@ if tickers_input:
               stock_data.dropna(subset=['Cumulative_Inflation'], inplace=True)
 
               # Calcular 'Inflation_Adjusted_Close'
-              stock_data['Inflation_Adjusted_Close'] = stock_data['Close'] * (stock_data['Cumulative_Inflation'].iloc[-1] / stock_data['Cumulative_Inflation'])
+              stock_data['Inflation_Adjusted_Close'] = stock_data['Adj Close'] * (stock_data['Cumulative_Inflation'].iloc[-1] / stock_data['Cumulative_Inflation'])
           else:
               # No ajustar por inflación
-              stock_data['Inflation_Adjusted_Close'] = stock_data['Close']
+              stock_data['Inflation_Adjusted_Close'] = stock_data['Adj Close']
 
           # Almacenar los datos en los diccionarios
           var_name = ticker_var_map[ticker]
-          stock_data_dict_nominal[var_name] = stock_data['Close']
+          stock_data_dict_nominal[var_name] = stock_data['Adj Close']
           stock_data_dict_adjusted[var_name] = stock_data['Inflation_Adjusted_Close']
 
           if show_percentage or show_percentage_from_recent:
@@ -555,10 +555,10 @@ if selected_ticker:
               stock_data.dropna(subset=['Cumulative_Inflation'], inplace=True)
 
               # Calcular Precio Ajustado por Inflación
-              stock_data['Inflation_Adjusted_Close'] = stock_data['Close'] * (stock_data['Cumulative_Inflation'].iloc[-1] / stock_data['Cumulative_Inflation'])
+              stock_data['Inflation_Adjusted_Close'] = stock_data['Adj Close'] * (stock_data['Cumulative_Inflation'].iloc[-1] / stock_data['Cumulative_Inflation'])
           else:
               # No ajustar por inflación
-              stock_data['Inflation_Adjusted_Close'] = stock_data['Close']
+              stock_data['Inflation_Adjusted_Close'] = stock_data['Adj Close']
 
           # Calcular Retornos Diarios Ajustados por Inflación
           stock_data['Return_Adjusted'] = stock_data['Inflation_Adjusted_Close'].pct_change()
