@@ -258,6 +258,8 @@ if tickers_input:
           if ticker.endswith('.BA'):
               # Unir con los datos de inflación
               stock_data = stock_data.join(daily_cpi, how='left')
+              # Print the first few rows to verify
+              print(stock_data.head())
               # Rellenar hacia adelante cualquier dato de inflación faltante
               stock_data['Cumulative_Inflation'].ffill(inplace=True)
               # Eliminar cualquier fila restante con NaN en 'Cumulative_Inflation'
