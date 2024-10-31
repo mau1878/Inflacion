@@ -93,6 +93,10 @@ def load_cpi_data():
   
   # Resamplear a diario y rellenar
   daily = cpi['Cumulative_Inflation'].resample('D').interpolate(method='linear')
+  
+  # Asegurar que el índice sea tz-naive
+  daily = daily.tz_localize(None)
+  
   return daily
 
 daily_cpi = load_cpi_data()
@@ -242,8 +246,8 @@ if tickers_input:
           if isinstance(stock_data.columns, pd.MultiIndex):
               stock_data.columns = stock_data.columns.get_level_values(0)
 
-          # Asegurar que el índice sea de tipo datetime
-          stock_data.index = pd.to_datetime(stock_data.index)
+          # Asegurar que el índice sea de tipo datetime y tz-naive
+          stock_data.index = pd.to_datetime(stock_data.index).tz_localize(None)
 
           # Ajustar precios por splits (solo si está en el diccionario)
           stock_data = ajustar_precios_por_splits(stock_data, ticker)
@@ -345,14 +349,10 @@ if tickers_input:
                   )
               )
 
-      except yf.shared.YFMissingError as e:
-          st.error(f"Yfinance no pudo encontrar el ticker '{ticker}'. Verifica que el ticker sea correcto y esté activo.")
-          logger.error(f"YFMissingError para {ticker}: {e}")
-          continue  # Saltar al siguiente ticker
-
       except Exception as e:
+          # Mensaje de error general y registro del error
           st.error(f"Ocurrió un error con el ticker {ticker}: {e}")
-          logger.error(f"Error con {ticker}: {e}")
+          logger.error(f"Error con el ticker {ticker}: {e}")
           continue  # Saltar al siguiente ticker
 
   # ------------------------------
@@ -575,6 +575,9 @@ if selected_ticker:
           if isinstance(stock_data.columns, pd.MultiIndex):
               stock_data.columns = stock_data.columns.get_level_values(0)
 
+          # Asegurar que el índice sea de tipo datetime y tz-naive
+          stock_data.index = pd.to_datetime(stock_data.index).tz_localize(None)
+
           # Ajustar precios por splits si está en el diccionario
           stock_data = ajustar_precios_por_splits(stock_data, ticker)
 
@@ -671,10 +674,6 @@ if selected_ticker:
 
           st.plotly_chart(fig_vol)
 
-  except yf.shared.YFMissingError as e:
-      st.error(f"Yfinance no pudo encontrar el ticker '{ticker}'. Verifica que el ticker sea correcto y esté activo.")
-      logger.error(f"YFMissingError para {ticker}: {e}")
-
   except Exception as e:
       st.error(f"Ocurrió un error al procesar el ticker {ticker}: {e}")
-      logger.error(f"Error al procesar {ticker}: {e}")
+      logger.error(f"Error al procesar el ticker {ticker}: {e}")
