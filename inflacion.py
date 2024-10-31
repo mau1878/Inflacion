@@ -49,51 +49,51 @@ splits = {
 # ------------------------------
 # Función para ajustar precios por splits
 def ajustar_precios_por_splits(df, ticker):
-try:
-   if ticker in splits:
-       adjustment = splits[ticker]
-       if isinstance(adjustment, tuple):
-           # Ajuste con múltiples cambios (por ejemplo, AGRO.BA)
-           split_date = datetime(2023, 11, 3)
-           df_before_split = df[df.index < split_date].copy()
-           df_after_split = df[df.index >= split_date].copy()
-           df_before_split['Adj Close'] /= adjustment[0]
-           df_after_split['Adj Close'] *= adjustment[1]
-           df = pd.concat([df_before_split, df_after_split]).sort_index()
-       else:
-           # Ajuste simple de split
-           split_threshold_date = datetime(2024, 1, 23)
-           df.loc[df.index <= split_threshold_date, 'Adj Close'] /= adjustment
-   # Si no hay ajuste, no hacer nada
-except Exception as e:
-   logger.error(f"Error ajustando splits para {ticker}: {e}")
-return df
+   try:
+      if ticker in splits:
+          adjustment = splits[ticker]
+          if isinstance(adjustment, tuple):
+              # Ajuste con múltiples cambios (por ejemplo, AGRO.BA)
+              split_date = datetime(2023, 11, 3)
+              df_before_split = df[df.index < split_date].copy()
+              df_after_split = df[df.index >= split_date].copy()
+              df_before_split['Adj Close'] /= adjustment[0]
+              df_after_split['Adj Close'] *= adjustment[1]
+              df = pd.concat([df_before_split, df_after_split]).sort_index()
+          else:
+              # Ajuste simple de split
+              split_threshold_date = datetime(2024, 1, 23)
+              df.loc[df.index <= split_threshold_date, 'Adj Close'] /= adjustment
+      # Si no hay ajuste, no hacer nada
+   except Exception as e:
+      logger.error(f"Error ajustando splits para {ticker}: {e}")
+   return df
 
 # ------------------------------
 # Cargar datos de inflación desde el archivo CSV
 @st.cache_data
 def load_cpi_data():
-try:
-   cpi = pd.read_csv('inflaciónargentina2.csv')
-except FileNotFoundError:
-   st.error("El archivo 'inflaciónargentina2.csv' no se encontró. Asegúrate de que el archivo esté en el mismo directorio que este script.")
-   st.stop()
+   try:
+      cpi = pd.read_csv('inflaciónargentina2.csv')
+   except FileNotFoundError:
+      st.error("El archivo 'inflaciónargentina2.csv' no se encontró. Asegúrate de que el archivo esté en el mismo directorio que este script.")
+      st.stop()
+      
+   # Asegurar que las columnas necesarias existan
+   if 'Date' not in cpi.columns or 'CPI_MoM' not in cpi.columns:
+      st.error("El archivo CSV debe contener las columnas 'Date' y 'CPI_MoM'.")
+      st.stop()
+      
+   # Convertir la columna 'Date' a datetime
+   cpi['Date'] = pd.to_datetime(cpi['Date'], format='%d/%m/%Y')
+   cpi.set_index('Date', inplace=True)
    
-# Asegurar que las columnas necesarias existan
-if 'Date' not in cpi.columns or 'CPI_MoM' not in cpi.columns:
-   st.error("El archivo CSV debe contener las columnas 'Date' y 'CPI_MoM'.")
-   st.stop()
+   # Calcular la inflación acumulada
+   cpi['Cumulative_Inflation'] = (1 + cpi['CPI_MoM']).cumprod()
    
-# Convertir la columna 'Date' a datetime
-cpi['Date'] = pd.to_datetime(cpi['Date'], format='%d/%m/%Y')
-cpi.set_index('Date', inplace=True)
-
-# Calcular la inflación acumulada
-cpi['Cumulative_Inflation'] = (1 + cpi['CPI_MoM']).cumprod()
-
-# Resamplear a diario y rellenar
-daily = cpi['Cumulative_Inflation'].resample('D').interpolate(method='linear')
-return daily
+   # Resamplear a diario y rellenar
+   daily = cpi['Cumulative_Inflation'].resample('D').interpolate(method='linear')
+   return daily
 
 daily_cpi = load_cpi_data()
 
