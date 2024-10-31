@@ -47,13 +47,13 @@ splits = {
 }
 
 # ------------------------------
-# Función para ajustar precios por splits
+# Function to adjust prices for splits
 def ajustar_precios_por_splits(df, ticker):
   try:
       if ticker in splits:
           adjustment = splits[ticker]
           if isinstance(adjustment, tuple):
-              # Ajuste con múltiples cambios (por ejemplo, AGRO.BA)
+              # Adjust with multiple changes (e.g., AGRO.BA)
               split_date = datetime(2023, 11, 3)
               df_before_split = df[df.index < split_date].copy()
               df_after_split = df[df.index >= split_date].copy()
@@ -61,13 +61,23 @@ def ajustar_precios_por_splits(df, ticker):
               df_after_split['Adj Close'] *= adjustment[1]
               df = pd.concat([df_before_split, df_after_split]).sort_index()
           else:
-              # Ajuste simple de split
+              # Simple split adjustment
               split_threshold_date = datetime(2024, 1, 23)
               df.loc[df.index <= split_threshold_date, 'Adj Close'] /= adjustment
-      # Si no hay ajuste, no hacer nada
+      # If no adjustment, do nothing
   except Exception as e:
       logger.error(f"Error ajustando splits para {ticker}: {e}")
   return df
+
+# Example of downloading and processing data
+ticker = 'METR.BA'
+stock_data = yf.download(ticker, start='2000-01-01', end='2024-10-31')
+
+# Flatten the multi-level columns
+stock_data.columns = ['_'.join(col).strip() for col in stock_data.columns.values]
+
+# Adjust prices for splits
+stock_data = ajustar_precios_por_splits(stock_data, ticker)
 
 # ------------------------------
 # Cargar datos de inflación desde el archivo CSV
