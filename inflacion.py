@@ -13,7 +13,6 @@ logger = logging.getLogger(__name__)
 # ------------------------------
 # Diccionario de tickers y sus divisores
 splits = {
-  'MMM.BA': 2,
   'ADGO.BA': 1,
   'ADBE.BA': 2,
   'AEM.BA': 2,
@@ -44,6 +43,7 @@ splits = {
   'VIST.BA': 3,
   'WMT.BA': 3,
   'AGRO.BA': (6, 2.1)  # Ajustes para AGRO.BA
+  # 'METR.BA': 2,  # Remover o comentar si está inválido
 }
 
 # ------------------------------
@@ -235,7 +235,7 @@ if tickers_input:
           stock_data = yf.download(ticker, start=plot_start_date, end=daily_cpi.index.max().date())
 
           if stock_data.empty:
-              st.error(f"No se encontraron datos para el ticker {ticker}.")
+              st.error(f"No se encontraron datos para el ticker {ticker}. Verifica que el ticker sea correcto y esté activo.")
               continue
 
           # Aplanar MultiIndex si es necesario
@@ -345,8 +345,15 @@ if tickers_input:
                   )
               )
 
+      except yf.shared.YFMissingError as e:
+          st.error(f"Yfinance no pudo encontrar el ticker '{ticker}'. Verifica que el ticker sea correcto y esté activo.")
+          logger.error(f"YFMissingError para {ticker}: {e}")
+          continue  # Saltar al siguiente ticker
+
       except Exception as e:
           st.error(f"Ocurrió un error con el ticker {ticker}: {e}")
+          logger.error(f"Error con {ticker}: {e}")
+          continue  # Saltar al siguiente ticker
 
   # ------------------------------
   # Cálculos o Ratios Personalizados
@@ -562,7 +569,7 @@ if selected_ticker:
       stock_data = yf.download(ticker, start=vol_comparison_start_date, end=vol_comparison_end_date)
 
       if stock_data.empty:
-          st.error(f"No se encontraron datos para el ticker {ticker}.")
+          st.error(f"No se encontraron datos para el ticker {ticker}. Verifica que el ticker sea correcto y esté activo.")
       else:
           # Aplanar MultiIndex si es necesario
           if isinstance(stock_data.columns, pd.MultiIndex):
@@ -664,5 +671,10 @@ if selected_ticker:
 
           st.plotly_chart(fig_vol)
 
+  except yf.shared.YFMissingError as e:
+      st.error(f"Yfinance no pudo encontrar el ticker '{ticker}'. Verifica que el ticker sea correcto y esté activo.")
+      logger.error(f"YFMissingError para {ticker}: {e}")
+
   except Exception as e:
       st.error(f"Ocurrió un error al procesar el ticker {ticker}: {e}")
+      logger.error(f"Error al procesar {ticker}: {e}")
