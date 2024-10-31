@@ -222,8 +222,8 @@ stock_data_dict_nominal = {}
 stock_data_dict_adjusted = {}
 
 if tickers_input:
-tickers = [ticker.strip().upper() for ticker in tickers_input.split(',')]
-fig = go.Figure()
+   tickers = [ticker.strip().upper() for ticker in tickers_input.split(',')]
+   fig = go.Figure()
 
 # Mapeo de tickers a nombres de variables
 ticker_var_map = {ticker: ticker.replace('.', '_') for ticker in tickers}
