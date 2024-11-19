@@ -253,7 +253,7 @@ if tickers_input:
           stock_data = ajustar_precios_por_splits(stock_data, ticker)
 
           # Verificar si el ticker termina con '.BA' para ajustar por inflación
-          if ticker.endswith('.BA'):
+          if ticker.endswith('.BA') or ticker == '^MERV':
               # Unir con los datos de inflación
               stock_data = stock_data.join(daily_cpi, how='left')
               # Rellenar hacia adelante cualquier dato de inflación faltante
