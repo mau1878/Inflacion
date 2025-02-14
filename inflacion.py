@@ -600,47 +600,48 @@ if tickers_input:
     # Update layout
     # Update layout
 # Update layout
+# Add watermark
 fig.add_annotation(
-        text="MTaurus - X: mtaurus_ok",
-        xref="paper", yref="paper",
-        x=0.5, y=0.5,
-        showarrow=False,
-        font=dict(size=30, color="rgba(150, 150, 150, 0.3)"),
-        opacity=0.2
+    text="MTaurus - X: mtaurus_ok",
+    xref="paper", yref="paper",
+    x=0.5, y=0.5,
+    showarrow=False,
+    font=dict(size=30, color="rgba(150, 150, 150, 0.3)"),
+    opacity=0.2
+)
+
+# Update layout
+if show_percentage or show_percentage_from_recent:
+    fig.update_layout(
+        title='Precios Históricos Ajustados por Inflación (%)',
+        xaxis=dict(title='Fecha'),
+        yaxis=dict(title='Variación Porcentual (%)'),
+        showlegend=True,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        )
+    )
+else:
+    fig.update_layout(
+        title='Precios Históricos Ajustados por Inflación',
+        xaxis=dict(title='Fecha'),
+        yaxis=dict(title='Precio de Cierre Ajustado (ARS)'),
+        showlegend=True,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        )
     )
 
-    # Update layout - moved inside the if tickers_input block
-    if show_percentage or show_percentage_from_recent:
-        fig.update_layout(
-            title='Precios Históricos Ajustados por Inflación (%)',
-            xaxis=dict(title='Fecha'),
-            yaxis=dict(title='Variación Porcentual (%)'),
-            showlegend=True,
-            legend=dict(
-                orientation="h",
-                yanchor="bottom",
-                y=1.02,
-                xanchor="right",
-                x=1
-            )
-        )
-    else:
-        fig.update_layout(
-            title='Precios Históricos Ajustados por Inflación',
-            xaxis=dict(title='Fecha'),
-            yaxis=dict(title='Precio de Cierre Ajustado (ARS)'),
-            showlegend=True,
-            legend=dict(
-                orientation="h",
-                yanchor="bottom",
-                y=1.02,
-                xanchor="right",
-                x=1
-            )
-        )
-
-    # Display the plot
-    st.plotly_chart(fig)
+# Display the plot
+st.plotly_chart(fig)
 
 # ------------------------------
 # Custom Calculations Section
