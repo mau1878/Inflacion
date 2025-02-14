@@ -599,42 +599,35 @@ if tickers_input:
 
     # Update layout
     # Update layout
+# Update layout
 if show_percentage or show_percentage_from_recent:
-    layout_update = {
-        'title': {'text': 'Precios Históricos Ajustados por Inflación (%)'},
-        'xaxis': {'title': 'Fecha'},
-        'yaxis': {
-            'title': 'Variación Porcentual (%)',
-            'titlefont': {'color': '#1f77b4'},
-            'tickfont': {'color': '#1f77b4'}
-        },
-        'legend': {
-            'orientation': "h",
-            'yanchor': "bottom",
-            'y': 1.02,
-            'xanchor': "right",
-            'x': 1
-        },
-        'showlegend': True
-    }
+    fig.update_layout(
+        title='Precios Históricos Ajustados por Inflación (%)',
+        xaxis=dict(title='Fecha'),
+        yaxis=dict(title='Variación Porcentual (%)'),
+        showlegend=True,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        )
+    )
 else:
-    layout_update = {
-        'title': {'text': 'Precios Históricos Ajustados por Inflación'},
-        'xaxis': {'title': 'Fecha'},
-        'yaxis': {
-            'title': 'Precio de Cierre Ajustado (ARS)',
-            'titlefont': {'color': '#1f77b4'},
-            'tickfont': {'color': '#1f77b4'}
-        },
-        'legend': {
-            'orientation': "h",
-            'yanchor': "bottom",
-            'y': 1.02,
-            'xanchor': "right",
-            'x': 1
-        },
-        'showlegend': True
-    }
+    fig.update_layout(
+        title='Precios Históricos Ajustados por Inflación',
+        xaxis=dict(title='Fecha'),
+        yaxis=dict(title='Precio de Cierre Ajustado (ARS)'),
+        showlegend=True,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        )
+    )
 
 fig.update_layout(**layout_update)
 
