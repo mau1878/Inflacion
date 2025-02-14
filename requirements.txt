@@ -3,3 +3,5 @@ pandas
 yfinance
 matplotlib
 plotly
+requests
+urllib3
