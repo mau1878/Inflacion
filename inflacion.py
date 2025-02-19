@@ -56,9 +56,9 @@ def descargar_datos_yfinance(ticker, start, end):
         if not stock_data.empty:
             # Extract just the Adj Close column and flatten the MultiIndex
             if isinstance(stock_data.columns, pd.MultiIndex):
-                adj_close = stock_data['Adj Close'][ticker].to_frame('Adj Close')
+                adj_close = stock_data['Close'][ticker].to_frame('Adj Close')
             else:
-                adj_close = stock_data[['Adj Close']]
+                adj_close = stock_data[['Close']]
             return adj_close
         return pd.DataFrame()
     except Exception as e:
