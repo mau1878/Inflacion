@@ -104,7 +104,7 @@ def descargar_datos_analisistecnico(ticker, start_date, end_date):
             data = response.json()
             df = pd.DataFrame({
                 'Date': pd.to_datetime(data['t'], unit='s'),
-                'Adj Close': data['c']
+                'Close': data['c']
             })
             df = df.sort_values('Date').drop_duplicates(subset=['Date'])
             df.set_index('Date', inplace=True)
@@ -161,8 +161,8 @@ def descargar_datos_iol(ticker, start_date, end_date):
 
             df = pd.DataFrame(data['bars'])
             df['Date'] = pd.to_datetime(df['time'], unit='s')
-            df['Adj Close'] = df['close']
-            df = df[['Date', 'Adj Close']]
+            df['Close'] = df['close']
+            df = df[['Date', 'Close']]
             df.set_index('Date', inplace=True)
             df = df.sort_index().drop_duplicates()
             return df
@@ -217,7 +217,7 @@ def descargar_datos_byma(ticker, start_date, end_date):
             data = response.json()
             df = pd.DataFrame({
                 'Date': pd.to_datetime(data['t'], unit='s'),
-                'Adj Close': data['c']
+                'Close': data['c']
             })
             df = df.sort_values('Date').drop_duplicates(subset=['Date'])
             df.set_index('Date', inplace=True)
@@ -258,12 +258,12 @@ def ajustar_precios_por_splits(df, ticker):
                 split_date = datetime(2023, 11, 3)
                 df_before_split = df[df.index < split_date].copy()
                 df_after_split = df[df.index >= split_date].copy()
-                df_before_split['Adj Close'] /= adjustment[0]
-                df_after_split['Adj Close'] *= adjustment[1]
+                df_before_split['Close'] /= adjustment[0]
+                df_after_split['Close'] *= adjustment[1]
                 df = pd.concat([df_before_split, df_after_split]).sort_index()
             else:
                 split_threshold_date = datetime(2024, 1, 23)
-                df.loc[df.index <= split_threshold_date, 'Adj Close'] /= adjustment
+                df.loc[df.index <= split_threshold_date, 'Close'] /= adjustment
     except Exception as e:
         logger.error(f"Error ajustando splits para {ticker}: {e}")
     return df
@@ -456,11 +456,11 @@ if tickers_input:
             if stock_data.index.tz is not None:
                 stock_data.index = stock_data.index.tz_localize(None)
 
-            # For IOL and ByMA, rename the price column to 'Adj Close'
+            # For IOL and ByMA, rename the price column to 'Close'
             if data_source in ['IOL (Invertir Online)', 'ByMA Data']:
                 # If there's only one column left (excluding Date which is now index)
                 if len(stock_data.columns) == 1:
-                    stock_data = stock_data.rename(columns={stock_data.columns[0]: 'Adj Close'})
+                    stock_data = stock_data.rename(columns={stock_data.columns[0]: 'Close'})
 
             # Fix timezone offset in index
             stock_data.index = stock_data.index.tz_localize(None)
@@ -495,13 +495,13 @@ if tickers_input:
                 # Calculate inflation adjusted close
                 if not stock_data.empty:
                     last_cpi = stock_data['Cumulative_Inflation'].iloc[-1]
-                    stock_data['Inflation_Adjusted_Close'] = stock_data['Adj Close'] * (
+                    stock_data['Inflation_Adjusted_Close'] = stock_data['Close'] * (
                             last_cpi / stock_data['Cumulative_Inflation']
                     )
                 else:
-                    stock_data['Inflation_Adjusted_Close'] = stock_data['Adj Close']
+                    stock_data['Inflation_Adjusted_Close'] = stock_data['Close']
             else:
-                stock_data['Inflation_Adjusted_Close'] = stock_data['Adj Close']
+                stock_data['Inflation_Adjusted_Close'] = stock_data['Close']
 
             if stock_data.empty:
                 st.error(f"No hay datos suficientes para procesar {ticker}.")
@@ -509,7 +509,7 @@ if tickers_input:
 
             # Store data
             var_name = ticker_var_map[ticker]
-            stock_data_dict_nominal[var_name] = stock_data['Adj Close']
+            stock_data_dict_nominal[var_name] = stock_data['Close']
             stock_data_dict_adjusted[var_name] = stock_data['Inflation_Adjusted_Close']
 
             # Add traces to the figure
@@ -798,11 +798,11 @@ if selected_ticker:
                 stock_data = stock_data.join(daily_cpi, how='left')
                 stock_data['Cumulative_Inflation'].ffill(inplace=True)
                 stock_data.dropna(subset=['Cumulative_Inflation'], inplace=True)
-                stock_data['Inflation_Adjusted_Close'] = stock_data['Adj Close'] * (
+                stock_data['Inflation_Adjusted_Close'] = stock_data['Close'] * (
                     stock_data['Cumulative_Inflation'].iloc[-1] / stock_data['Cumulative_Inflation']
                 )
             else:
-                stock_data['Inflation_Adjusted_Close'] = stock_data['Adj Close']
+                stock_data['Inflation_Adjusted_Close'] = stock_data['Close']
 
             # Calculate returns and volatility
             stock_data['Return_Adjusted'] = stock_data['Inflation_Adjusted_Close'].pct_change()
