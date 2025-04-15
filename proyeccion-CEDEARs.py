@@ -203,17 +203,31 @@ def create_progressive_series(start_value, end_value, num_steps, acceleration=1.
   return progression
 
 # ### Función para descargar datos de stock con caché
+# ### Función para descargar datos de stock con caché
 @st.cache_data(show_spinner=False)
 def get_stock_data(ticker, start, end):
-  try:
-      df = yf.download(ticker, start=start, end=end)
-      if df.empty:
-          return None
-      return df['Adj Close']
-  except Exception as e:
-      st.error(f"Error al descargar datos para {ticker}: {e}")
-      return None
-
+    try:
+        df = yf.download(ticker, start=start, end=end, progress=False)
+        if df.empty:
+            return None
+        # Handle MultiIndex columns: extract 'Close' for the ticker
+        if isinstance(df.columns, pd.MultiIndex):
+            # Check if ticker exists in the columns
+            if ('Close', ticker) in df.columns:
+                return df[('Close', ticker)]
+            else:
+                st.error(f"No 'Close' data found for ticker {ticker}")
+                return None
+        else:
+            # Fallback for non-MultiIndex (unlikely with current yfinance)
+            if 'Close' in df.columns:
+                return df['Close']
+            else:
+                st.error(f"No 'Close' data found for ticker {ticker}")
+                return None
+    except Exception as e:
+        st.error(f"Error al descargar datos para {ticker}: {e}")
+        return None
 # Descargar datos de CEDEAR y activo subyacente
 with st.spinner("Descargando datos de CEDEAR..."):
   stock_data = get_stock_data(ticker, start_date, end_date)
