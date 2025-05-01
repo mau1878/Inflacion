@@ -53,7 +53,7 @@ splits = {
 
 # ------------------------------
 # Data source functions
-[⚠️ Suspicious Content] @retry(stop_max_attempt_number=3, wait_fixed=5000)  # Retry 3 times, wait 5 seconds between attempts
+@retry(stop_max_attempt_number=3, wait_fixed=5000)  # Retry 3 times, wait 5 seconds between attempts
 def descargar_datos_yfinance(ticker, start, end):
     try:
         # Cache file path
