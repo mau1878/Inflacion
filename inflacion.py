@@ -7,13 +7,15 @@ import logging
 import re
 import requests
 import urllib3
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+import time  # Added missing import
 import os
 from curl_cffi import requests as cffi_requests
 from retrying import retry
 
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 # Configurar logging
-logging.basicConfig(level=logging.ERROR)
+logging.basicConfig(level=logging.INFO)  # Changed to INFO for better debugging
 logger = logging.getLogger(__name__)
 
 # ------------------------------
@@ -53,7 +55,7 @@ splits = {
 
 # ------------------------------
 # Data source functions
-@retry(stop_max_attempt_number=3, wait_fixed=5000)  # Retry 3 times, wait 5 seconds between attempts
+@retry(stop_max_attempt_number=3, wait_fixed=5000)  # Retry 3 times, wait 5 seconds
 def descargar_datos_yfinance(ticker, start, end):
     try:
         # Cache file path
@@ -66,12 +68,12 @@ def descargar_datos_yfinance(ticker, start, end):
             logger.info(f"Datos cargados desde caché para {ticker}")
             return df
 
-        # Create a curl_cffi session with Chrome impersonation
-        session = cffi_requests.Session(impersonate="chrome124")
-        
-        # Optional: Add headers for additional browser-like behavior
+        # Create a curl_cffi session with updated Chrome impersonation
+        session = cffi_requests.Session(impersonate="chrome131")  # Updated to chrome131
+
+        # Add headers for additional browser-like behavior
         session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.5',
             'DNT': '1',
@@ -86,11 +88,25 @@ def descargar_datos_yfinance(ticker, start, end):
             logger.warning(f"No se encontraron datos para el ticker {ticker} en el rango de fechas seleccionado.")
             return pd.DataFrame()
 
-        # Extract just the Close column and flatten the MultiIndex
+        # Extract just the Close column and handle MultiIndex safely
         if isinstance(stock_data.columns, pd.MultiIndex):
-            close = stock_data['Close'][ticker].to_frame('Close')
+            # Check if 'Close' level exists
+            if 'Close' in stock_data.columns.levels[0]:
+                close = stock_data['Close']
+                # If ticker is in the second level, use it; otherwise, assume single ticker
+                if ticker in close.columns:
+                    close = close[ticker].to_frame('Close')
+                else:
+                    close = close.iloc[:, 0].to_frame('Close')  # Fallback to first column
+            else:
+                logger.error(f"No 'Close' column found for {ticker} in MultiIndex.")
+                return pd.DataFrame()
         else:
-            close = stock_data[['Close']]
+            if 'Close' in stock_data.columns:
+                close = stock_data[['Close']]
+            else:
+                logger.error(f"No 'Close' column found for {ticker}.")
+                return pd.DataFrame()
 
         # Save to cache
         close.to_csv(cache_file)
@@ -272,6 +288,16 @@ def descargar_datos(ticker, start, end, source='YFinance'):
     try:
         if source == 'YFinance':
             df = descargar_datos_yfinance(ticker, start, end)
+            # Fallback for .BA tickers if yfinance fails
+            if df.empty and ticker.endswith('.BA'):
+                logger.warning(f"yfinance falló para {ticker}, intentando con analisistecnico...")
+                df = descargar_datos_analisistecnico(ticker, start, end)
+                if df.empty:
+                    logger.warning(f"analisistecnico falló para {ticker}, intentando con iol...")
+                    df = descargar_datos_iol(ticker, start, end)
+                    if df.empty:
+                        logger.warning(f"iol falló para {ticker}, intentando con byma...")
+                        df = descargar_datos_byma(ticker, start, end)
         elif source == 'AnálisisTécnico.com.ar':
             df = descargar_datos_analisistecnico(ticker, start, end)
         elif source == 'IOL (Invertir Online)':
@@ -281,7 +307,7 @@ def descargar_datos(ticker, start, end, source='YFinance'):
         else:
             logger.error(f"Unknown data source: {source}")
             return pd.DataFrame()
-        time.sleep(2)  # Add a 2-second delay to avoid rate-limiting
+        time.sleep(5)  # Increased to 5 seconds to reduce rate-limiting
         return df
     except Exception as e:
         logger.error(f"Error downloading data for {ticker} from {source}: {e}")
@@ -357,8 +383,6 @@ st.sidebar.markdown("""
 
 *Nota: Algunos tickers pueden no estar disponibles en todas las fuentes.*
 """)
-
-# Rest of your UI code...
 
 # ------------------------------
 # Calculador de precios por inflación
@@ -473,12 +497,6 @@ if tickers_input:
     fig = go.Figure()
     ticker_var_map = {ticker: ticker.replace('.', '_') for ticker in tickers}
 
-    # Process each ticker
-    # Process each ticker
-    # Process each ticker
-    # Process each ticker
-    # Process each ticker
-    # Process each ticker
     for i, ticker in enumerate(tickers):
         try:
             # Download data using selected source
@@ -497,7 +515,6 @@ if tickers_input:
 
             # For IOL and ByMA, rename the price column to 'Close'
             if data_source in ['IOL (Invertir Online)', 'ByMA Data']:
-                # If there's only one column left (excluding Date which is now index)
                 if len(stock_data.columns) == 1:
                     stock_data = stock_data.rename(columns={stock_data.columns[0]: 'Close'})
 
@@ -510,8 +527,8 @@ if tickers_input:
 
             # Determine if inflation adjustment is needed based on data source and ticker
             needs_inflation_adjustment = (
-                    (data_source == 'YFinance' and (ticker.endswith('.BA') or ticker == '^MERV')) or
-                    (data_source != 'YFinance')  # Apply inflation adjustment for all tickers from other sources
+                (data_source == 'YFinance' and (ticker.endswith('.BA') or ticker == '^MERV')) or
+                (data_source != 'YFinance')
             )
 
             if needs_inflation_adjustment and not stock_data.empty:
@@ -535,7 +552,7 @@ if tickers_input:
                 if not stock_data.empty:
                     last_cpi = stock_data['Cumulative_Inflation'].iloc[-1]
                     stock_data['Inflation_Adjusted_Close'] = stock_data['Close'] * (
-                            last_cpi / stock_data['Cumulative_Inflation']
+                        last_cpi / stock_data['Cumulative_Inflation']
                     )
                 else:
                     stock_data['Inflation_Adjusted_Close'] = stock_data['Close']
@@ -637,53 +654,38 @@ if tickers_input:
     )
 
     # Update layout
-    # Update layout
-# Update layout
-# Add watermark
-fig.add_annotation(
-    text="MTaurus - X: mtaurus_ok",
-    xref="paper", yref="paper",
-    x=0.5, y=0.5,
-    showarrow=False,
-    font=dict(size=30, color="rgba(150, 150, 150, 0.3)"),
-    opacity=0.2
-)
-
-# Update layout
-if show_percentage or show_percentage_from_recent:
-    fig.update_layout(
-        title='Precios Históricos Ajustados por Inflación (%)',
-        xaxis=dict(title='Fecha'),
-        yaxis=dict(title='Variación Porcentual (%)'),
-        showlegend=True,
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="right",
-            x=1
+    if show_percentage or show_percentage_from_recent:
+        fig.update_layout(
+            title='Precios Históricos Ajustados por Inflación (%)',
+            xaxis=dict(title='Fecha'),
+            yaxis=dict(title='Variación Porcentual (%)'),
+            showlegend=True,
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            )
         )
-    )
-else:
-    fig.update_layout(
-        title='Precios Históricos Ajustados por Inflación',
-        xaxis=dict(title='Fecha'),
-        yaxis=dict(title='Precio de Cierre Ajustado (ARS)'),
-        showlegend=True,
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="right",
-            x=1
+    else:
+        fig.update_layout(
+            title='Precios Históricos Ajustados por Inflación',
+            xaxis=dict(title='Fecha'),
+            yaxis=dict(title='Precio de Cierre Ajustado (ARS)'),
+            showlegend=True,
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            )
         )
-    )
 
-# Display the plot
-st.plotly_chart(fig)
+    # Display the plot
+    st.plotly_chart(fig)
 
-# ------------------------------
-# Custom Calculations Section
 # ------------------------------
 # Custom Calculations Section
 st.subheader('3- Cálculos o Ratios Personalizados')
@@ -787,7 +789,7 @@ if custom_expression:
     except Exception as e:
         available_vars = ', '.join([v for v in ticker_var_map.values()])
         st.error(
-            f"Error al evaluar la expresión personalizada: {e}\n\n**Nombres de variables disponibles:** {available_vars}")  
+            f"Error al evaluar la expresión personalizada: {e}\n\n**Nombres de variables disponibles:** {available_vars}")
 
 # ------------------------------
 # Volatility Analysis Section
