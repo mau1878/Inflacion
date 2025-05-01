@@ -271,16 +271,18 @@ def descargar_datos_byma(ticker, start_date, end_date):
 def descargar_datos(ticker, start, end, source='YFinance'):
     try:
         if source == 'YFinance':
-            return descargar_datos_yfinance(ticker, start, end)
+            df = descargar_datos_yfinance(ticker, start, end)
         elif source == 'AnálisisTécnico.com.ar':
-            return descargar_datos_analisistecnico(ticker, start, end)
+            df = descargar_datos_analisistecnico(ticker, start, end)
         elif source == 'IOL (Invertir Online)':
-            return descargar_datos_iol(ticker, start, end)
+            df = descargar_datos_iol(ticker, start, end)
         elif source == 'ByMA Data':
-            return descargar_datos_byma(ticker, start, end)
+            df = descargar_datos_byma(ticker, start, end)
         else:
             logger.error(f"Unknown data source: {source}")
             return pd.DataFrame()
+        time.sleep(2)  # Add a 2-second delay to avoid rate-limiting
+        return df
     except Exception as e:
         logger.error(f"Error downloading data for {ticker} from {source}: {e}")
         return pd.DataFrame()
