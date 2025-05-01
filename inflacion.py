@@ -53,51 +53,54 @@ splits = {
 
 # ------------------------------
 # Data source functions
-@retry(stop_max_attempt_number=3, wait_fixed=5000)  # Retry 3 times, wait 5 seconds between attempts
+[⚠️ Suspicious Content] @retry(stop_max_attempt_number=3, wait_fixed=5000)  # Retry 3 times, wait 5 seconds between attempts
 def descargar_datos_yfinance(ticker, start, end):
-    # Define cache file path
-    cache_file = f"cache/{ticker}_{start}_{end}.csv"
-    os.makedirs("cache", exist_ok=True)
-
-    # Check if cached data exists
-    if os.path.exists(cache_file):
-        df = pd.read_csv(cache_file, parse_dates=['Date'])
-        logger.info(f"Datos cargados desde caché para {ticker}")
-        # Ensure output matches expected format (DataFrame with 'Close' column)
-        if 'Close' in df.columns:
-            return df.set_index('Date')[['Close']]
-        logger.warning(f"Caché para {ticker} no contiene columna 'Close', descargando datos nuevos...")
-        os.remove(cache_file)  # Remove invalid cache
-
     try:
-        # Create a curl_cffi session with browser impersonation
-        session = cffi_requests.Session(impersonate="chrome124")  # Mimic Chrome 124 TLS fingerprint
+        # Cache file path
+        cache_file = f"cache/{ticker}_{start}_{end}.csv"
+        os.makedirs("cache", exist_ok=True)
 
-        # Download data with yfinance using the custom session
+        # Check if cached data exists
+        if os.path.exists(cache_file):
+            df = pd.read_csv(cache_file, parse_dates=['Date'])
+            logger.info(f"Datos cargados desde caché para {ticker}")
+            return df
+
+        # Create a curl_cffi session with Chrome impersonation
+        session = cffi_requests.Session(impersonate="chrome124")
+        
+        # Optional: Add headers for additional browser-like behavior
+        session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+        })
+
+        # Download data using yfinance with the custom session
         stock_data = yf.download(ticker, start=start, end=end, progress=False, session=session)
 
-        if not stock_data.empty:
-            # Extract just the Close column and flatten the MultiIndex
-            if isinstance(stock_data.columns, pd.MultiIndex):
-                adj_close = stock_data['Close'][ticker].to_frame('Close')
-            else:
-                adj_close = stock_data[['Close']]
+        if stock_data.empty:
+            logger.warning(f"No se encontraron datos para el ticker {ticker} en el rango de fechas seleccionado.")
+            return pd.DataFrame()
 
-            # Add Date index for caching
-            adj_close = adj_close.reset_index()
-            # Save to cache
-            adj_close.to_csv(cache_file, index=False)
-            logger.info(f"Datos guardados en caché para {ticker}")
+        # Extract just the Close column and flatten the MultiIndex
+        if isinstance(stock_data.columns, pd.MultiIndex):
+            close = stock_data['Close'][ticker].to_frame('Close')
+        else:
+            close = stock_data[['Close']]
 
-            # Return DataFrame with Date as index and Close column
-            return adj_close.set_index('Date')[['Close']]
+        # Save to cache
+        close.to_csv(cache_file)
+        logger.info(f"Datos guardados en caché para {ticker}")
 
-        logger.warning(f"No se encontraron datos para el ticker {ticker} en el rango de fechas seleccionado.")
-        return pd.DataFrame()
+        return close
 
     except Exception as e:
         logger.error(f"Error downloading data from yfinance for {ticker}: {e}")
-        raise  # Re-raise for retry logic
+        return pd.DataFrame()
 
 def descargar_datos_analisistecnico(ticker, start_date, end_date):
     try:
