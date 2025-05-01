@@ -3,4 +3,5 @@ pandas
 yfinance
 matplotlib
 plotly
-
+curl_cffi
+os
