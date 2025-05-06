@@ -321,11 +321,19 @@ def ajustar_precios_por_splits(df, ticker):
             adjustment = splits[ticker]
             if isinstance(adjustment, tuple):
                 split_date = datetime(2023, 11, 3)
+                # Create separate DataFrames for different date ranges
                 df_before_split = df[df.index < split_date].copy()
-                df_after_split = df[df.index >= split_date].copy()
-                df_before_split['Close'] /= adjustment[0]
-                df_after_split['Close'] *= adjustment[1]
-                df = pd.concat([df_before_split, df_after_split]).sort_index()
+                df_on_split = df[df.index == split_date].copy()
+                df_after_split = df[df.index > split_date].copy()
+                
+                # Adjust prices before split date
+                df_before_split['Close'] /= adjustment[0]  # Divide by 6 for AGRO.BA
+                # Adjust prices on split date
+                df_on_split['Close'] *= adjustment[1]     # Multiply by 2.1 for AGRO.BA
+                # Prices after split date remain unchanged
+                
+                # Concatenate and sort
+                df = pd.concat([df_before_split, df_on_split, df_after_split]).sort_index()
             else:
                 split_threshold_date = datetime(2024, 1, 23)
                 df.loc[df.index <= split_threshold_date, 'Close'] /= adjustment
