@@ -317,29 +317,67 @@ def descargar_datos(ticker, start, end, source='YFinance'):
 # Helper functions
 def ajustar_precios_por_splits(df, ticker):
     try:
+        if df.empty:
+            return df
+
+        df = df.copy()  # Avoid modifying the original DataFrame
+
+        # Combine hardcoded and user-defined splits
+        all_splits = []
+
+        # Add hardcoded splits from splits dictionary
         if ticker in splits:
             adjustment = splits[ticker]
             if isinstance(adjustment, tuple):
-                split_date = datetime(2023, 11, 3)
-                # Create separate DataFrames for different date ranges
-                df_before_split = df[df.index < split_date].copy()
-                df_on_split = df[df.index == split_date].copy()
-                df_after_split = df[df.index > split_date].copy()
-                
-                # Adjust prices before split date
-                df_before_split['Close'] /= adjustment[0]  # Divide by 6 for AGRO.BA
-                # Adjust prices on split date
-                df_on_split['Close'] *= adjustment[1]     # Multiply by 2.1 for AGRO.BA
-                # Prices after split date remain unchanged
-                
-                # Concatenate and sort
-                df = pd.concat([df_before_split, df_on_split, df_after_split]).sort_index()
+                # Handle special case like AGRO.BA
+                all_splits.append({
+                    "date": datetime(2023, 11, 3),
+                    "ratio": adjustment[0],  # e.g., 6 for AGRO.BA
+                    "type": "divide"
+                })
+                all_splits.append({
+                    "date": datetime(2023, 11, 3),
+                    "ratio": adjustment[1],  # e.g., 2.1 for AGRO.BA
+                    "type": "multiply"
+                })
             else:
-                split_threshold_date = datetime(2024, 1, 23)
-                df.loc[df.index <= split_threshold_date, 'Close'] /= adjustment
+                all_splits.append({
+                    "date": datetime(2024, 1, 23),
+                    "ratio": adjustment,
+                    "type": "divide"
+                })
+
+        # Add user-defined splits from session state
+        if "custom_splits" in st.session_state:
+            for split in st.session_state.custom_splits:
+                if split["ticker"] == ticker:
+                    all_splits.append({
+                        "date": datetime.combine(split["date"], datetime.min.time()),
+                        "ratio": split["ratio"],
+                        "type": "divide"
+                    })
+
+        # Sort splits by date (earliest to latest)
+        all_splits = sorted(all_splits, key=lambda x: x["date"])
+
+        # Apply splits sequentially
+        for split in all_splits:
+            split_date = split["date"]
+            ratio = split["ratio"]
+            split_type = split["type"]
+
+            if split_type == "divide":
+                # Divide prices before or on the split date
+                df.loc[df.index <= split_date, 'Close'] /= ratio
+            elif split_type == "multiply":
+                # Multiply prices on the split date (for special cases like AGRO.BA)
+                df.loc[df.index == split_date, 'Close'] *= ratio
+
+        return df
+
     except Exception as e:
         logger.error(f"Error ajustando splits para {ticker}: {e}")
-    return df
+        return df
 
 @st.cache_data
 def load_cpi_data():
@@ -391,7 +429,53 @@ st.sidebar.markdown("""
 
 *Nota: Algunos tickers pueden no estar disponibles en todas las fuentes.*
 """)
+# In the Streamlit Sidebar (after data_source selection)
+st.sidebar.subheader("Ajustes Manuales de Splits")
 
+# Input for the ticker to apply splits
+custom_split_ticker = st.sidebar.text_input(
+    "Ingresa el ticker para ajustes de splits (por ejemplo, GLOB.BA):",
+    key="custom_split_ticker_input"
+)
+
+# Initialize a list to store split inputs
+if "custom_splits" not in st.session_state:
+    st.session_state.custom_splits = []
+
+# Form to add split ratio and date
+with st.sidebar.form(key="split_form"):
+    split_ratio = st.number_input(
+        "Ingresa el ratio de split (por ejemplo, 3 para un split 3:1):",
+        min_value=1.0,
+        step=0.1,
+        key="split_ratio_input"
+    )
+    split_date = st.date_input(
+        "Selecciona la fecha del split:",
+        min_value=datetime(2000, 1, 1).date(),
+        max_value=datetime.now().date(),
+        key="split_date_input"
+    )
+    submit_split = st.form_submit_button("Agregar Split")
+
+    if submit_split and custom_split_ticker:
+        st.session_state.custom_splits.append({
+            "ticker": custom_split_ticker.strip().upper(),
+            "ratio": split_ratio,
+            "date": split_date
+        })
+        st.sidebar.success(f"Split agregado: {split_ratio} en {split_date} para {custom_split_ticker}")
+
+# Display and allow removal of added splits
+if st.session_state.custom_splits:
+    st.sidebar.write("Splits Personalizados Agregados:")
+    for i, split in enumerate(st.session_state.custom_splits):
+        st.sidebar.write(
+            f"Ticker: {split['ticker']}, Ratio: {split['ratio']}, Fecha: {split['date']}"
+        )
+        if st.sidebar.button(f"Eliminar Split {i+1}", key=f"remove_split_{i}"):
+            st.session_state.custom_splits.pop(i)
+            st.sidebar.success("Split eliminado.")
 # ------------------------------
 # Calculador de precios por inflación
 st.subheader('1- Calculador de precios por inflación')
