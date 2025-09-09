@@ -592,7 +592,7 @@ if tickers_input:
     for i, ticker in enumerate(tickers):
         try:
             # Download data using selected source
-            stock_data = descargar_datos(ticker, plot_start_date, daily_cpi.index.max().date(), data_source)
+            stock_data = descargar_datos(ticker, plot_start_date, daily_cpi.index.max().date()+ timedelta(days=1), data_source)
 
             if stock_data.empty:
                 st.error(f"No se encontraron datos para el ticker {ticker}.")
