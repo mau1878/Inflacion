@@ -771,10 +771,6 @@ if tickers_input:
             text='Precio de Cierre Ajustado (ARS)' if not (show_percentage or show_percentage_from_recent) else 'Variación Porcentual (%)',
             font=dict(size=14, color='white')
         ),
-        yaxis=dict(
-            tickformat=".2f" if not (show_percentage or show_percentage_from_recent) else ".2%",
-            ticksuffix=" ARS" if not (show_percentage or show_percentage_from_recent) else "%"
-        ),
         **plot_style
     )
 
@@ -875,22 +871,19 @@ if custom_expression:
                 )
             )
 
-        fig.update_layout(
-            title=dict(
-                text='Precios Históricos Ajustados por Inflación' if not (show_percentage or show_percentage_from_recent) else 'Precios Históricos Ajustados por Inflación (%)',
-                font=dict(size=20, color='white')
-            ),
-            xaxis_title=dict(text='Fecha', font=dict(size=14, color='white')),
-            yaxis_title=dict(
-                text='Precio de Cierre Ajustado (ARS)' if not (show_percentage or show_percentage_from_recent) else 'Variación Porcentual (%)',
-                font=dict(size=14, color='white')
-            ),
-            yaxis=dict(
-                tickformat=".2f" if not (show_percentage or show_percentage_from_recent) else ".2%",
-                ticksuffix=" ARS" if not (show_percentage or show_percentage_from_recent) else "%"
-            ),
-            **plot_style
-        )
+            fig.update_layout(
+                title=dict(
+                    text='Precios Históricos Ajustados por Inflación' if not (show_percentage or show_percentage_from_recent) else 'Precios Históricos Ajustados por Inflación (%)',
+                    font=dict(size=20, color='white')
+                ),
+                xaxis_title=dict(text='Fecha', font=dict(size=14, color='white')),
+                yaxis_title=dict(
+                    text='Precio de Cierre Ajustado (ARS)' if not (show_percentage or show_percentage_from_recent) else 'Variación Porcentual (%)',
+                    font=dict(size=14, color='white')
+                ),
+                **plot_style
+            )
+
 
         st.plotly_chart(fig)
 
