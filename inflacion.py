@@ -494,7 +494,46 @@ if st.session_state.custom_splits:
         if st.sidebar.button(f"Eliminar Split {i+1}", key=f"remove_split_{i}"):
             st.session_state.custom_splits.pop(i)
             st.sidebar.success("Split eliminado.")
+st.sidebar.subheader("Eventos Personalizados")
 
+if "custom_events" not in st.session_state:
+    st.session_state.custom_events = []
+
+with st.sidebar.form(key="event_form"):
+    event_ticker = st.text_input(
+        "Ingresa el ticker para el evento (por ejemplo, GLOB.BA):",
+        key="event_ticker_input"
+    )
+    event_date = st.date_input(
+        "Selecciona la fecha del evento:",
+        min_value=datetime(2000, 1, 1).date(),
+        max_value=datetime.now().date(),
+        key="event_date_input"
+    )
+    event_description = st.text_input(
+        "Ingresa una descripción para el evento (por ejemplo, Ganancias Q4):",
+        key="event_description_input"
+    )
+    submit_event = st.form_submit_button("Agregar Evento")
+
+    if submit_event and event_ticker and event_description:
+        st.session_state.custom_events.append({
+            "ticker": event_ticker.strip().upper(),
+            "date": event_date,
+            "description": event_description
+        })
+        st.sidebar.success(f"Evento agregado: {event_description} en {event_date} para {event_ticker}")
+
+# Display and allow removal of added events
+if st.session_state.custom_events:
+    st.sidebar.write("Eventos Personalizados Agregados:")
+    for i, event in enumerate(st.session_state.custom_events):
+        st.sidebar.write(
+            f"Ticker: {event['ticker']}, Evento: {event['description']}, Fecha: {event['date']}"
+        )
+        if st.sidebar.button(f"Eliminar Evento {i+1}", key=f"remove_event_{i}"):
+            st.session_state.custom_events.pop(i)
+            st.sidebar.success("Evento eliminado.")
 # ------------------------------
 # Calculador de precios por inflación
 st.subheader('1- Calculador de precios por inflación')
@@ -746,7 +785,16 @@ if tickers_input:
                         annotation_position="top",
                         annotation=dict(font=dict(color='white'))
                     )
-
+            # Add event annotations
+            for event in st.session_state.custom_events:
+                if event["ticker"] == ticker:
+                    fig.add_vline(
+                        x=datetime.combine(event["date"], datetime.min.time()).timestamp() * 1000,
+                        line=dict(color="yellow", width=1, dash="dot"),
+                        annotation_text=event["description"],
+                        annotation_position="top",
+                        annotation=dict(font=dict(color='yellow'))
+                    )
         except Exception as e:
             st.error(f"Error procesando {ticker}: {e}")
             logger.error(f"Error processing {ticker}: {e}")
