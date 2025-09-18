@@ -34,7 +34,7 @@ plot_style = {
         gridcolor='rgba(255, 255, 255, 0.2)',
         zerolinecolor='rgba(255, 255, 255, 0.2)',
         tickformat=".2f",
-        ticksuffix=" ARS"
+
     ),
     'yaxis2': dict(
         gridcolor='rgba(255, 255, 255, 0.2)',
