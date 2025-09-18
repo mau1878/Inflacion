@@ -803,10 +803,10 @@ if tickers_input:
     fig.add_annotation(
         text="MTaurus - X: mtaurus_ok",
         xref="paper", yref="paper",
-        x=0.02, y=0.02,
+        x=0.5, y=0.5,
         showarrow=False,
-        font=dict(size=20, color="rgba(255, 255, 255, 0.2)"),
-        opacity=0.1
+        font=dict(size=30, color="rgba(255, 255, 255, 0.2)"),
+        opacity=0.15
     )
 
     fig.update_layout(
