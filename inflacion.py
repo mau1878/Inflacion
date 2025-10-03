@@ -34,7 +34,6 @@ plot_style = {
         gridcolor='rgba(255, 255, 255, 0.2)',
         zerolinecolor='rgba(255, 255, 255, 0.2)',
         tickformat=".2f",
-
     ),
     'yaxis2': dict(
         gridcolor='rgba(255, 255, 255, 0.2)',
@@ -427,14 +426,39 @@ def load_cpi_data():
         st.error(f"Error loading CPI data: {e}")
         st.stop()
 
+@st.cache_data
+def load_us_cpi_data():
+    try:
+        url = "https://raw.githubusercontent.com/mau1878/Inflacion/refs/heads/main/inflaci%C3%B3nUSA.csv"
+        cpi = pd.read_csv(url)
+        # Assuming similar format to Argentine CPI; adjust if columns differ (e.g., rename if needed)
+        if 'Date' not in cpi.columns or 'CPI_MoM' not in cpi.columns:
+            st.error("The US CPI CSV must contain columns 'Date' and 'CPI_MoM'. Please check the file.")
+            st.stop()
+
+        cpi['Date'] = pd.to_datetime(cpi['Date'], format='%d/%m/%Y')  # Adjust format if different
+        cpi.set_index('Date', inplace=True)
+        cpi['Cumulative_Inflation'] = (1 + cpi['CPI_MoM']).cumprod()
+        daily = cpi['Cumulative_Inflation'].resample('D').interpolate(method='linear')
+
+        daily.index = pd.to_datetime(daily.index)
+        if daily.index.tz is not None:
+            daily.index = daily.index.tz_localize(None)
+
+        return daily
+    except Exception as e:
+        st.error(f"Error loading US CPI data from URL: {e}")
+        st.stop()
+
 # Load CPI data
 daily_cpi = load_cpi_data()
+daily_us_cpi = load_us_cpi_data()
 
 # ------------------------------
 # Streamlit UI
 st.title('Ajustadora de acciones del Merval por inflación - MTaurus - [X: MTaurus_ok](https://x.com/MTaurus_ok)')
 
-# Add data source selector in sidebar
+# Sidebar configuration (global)
 st.sidebar.title("Configuración")
 data_source = st.sidebar.radio(
     "Fuente de datos:",
@@ -451,7 +475,6 @@ st.sidebar.markdown("""
 *Nota: Algunos tickers pueden no estar disponibles en todas las fuentes.*
 """)
 
-# In the Streamlit Sidebar (after data_source selection)
 st.sidebar.subheader("Ajustes Manuales de Splits")
 
 custom_split_ticker = st.sidebar.text_input(
@@ -494,6 +517,7 @@ if st.session_state.custom_splits:
         if st.sidebar.button(f"Eliminar Split {i+1}", key=f"remove_split_{i}"):
             st.session_state.custom_splits.pop(i)
             st.sidebar.success("Split eliminado.")
+
 st.sidebar.subheader("Eventos Personalizados")
 
 if "custom_events" not in st.session_state:
@@ -524,7 +548,6 @@ with st.sidebar.form(key="event_form"):
         })
         st.sidebar.success(f"Evento agregado: {event_description} en {event_date} para {event_ticker}")
 
-# Display and allow removal of added events
 if st.session_state.custom_events:
     st.sidebar.write("Eventos Personalizados Agregados:")
     for i, event in enumerate(st.session_state.custom_events):
@@ -534,547 +557,758 @@ if st.session_state.custom_events:
         if st.sidebar.button(f"Eliminar Evento {i+1}", key=f"remove_event_{i}"):
             st.session_state.custom_events.pop(i)
             st.sidebar.success("Evento eliminado.")
-# ------------------------------
-# Calculador de precios por inflación
-st.subheader('1- Calculador de precios por inflación')
 
-value_choice = st.radio(
-    "¿Quieres ingresar el valor para la fecha de inicio o la fecha de fin?",
-    ('Fecha de Inicio', 'Fecha de Fin'),
-    key='value_choice_radio'
-)
+# Main content in tabs
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["Inflation Calculator", "Argentine Stock Adjuster", "Custom Calculations", "Volatility Analysis", "US Stock Adjuster"])
 
-if value_choice == 'Fecha de Inicio':
-    start_date = st.date_input(
-        'Selecciona la fecha de inicio:',
-        min_value=daily_cpi.index.min().date(),
-        max_value=daily_cpi.index.max().date(),
-        value=daily_cpi.index.min().date(),
-        key='start_date_input'
-    )
-    end_date = st.date_input(
-        'Selecciona la fecha de fin:',
-        min_value=daily_cpi.index.min().date(),
-        max_value=daily_cpi.index.max().date(),
-        value=daily_cpi.index.max().date(),
-        key='end_date_input'
-    )
-    start_value = st.number_input(
-        'Ingresa el valor en la fecha de inicio (en ARS):',
-        min_value=0.0,
-        value=100.0,
-        key='start_value_input'
+with tab1:
+    st.subheader('Calculador de precios por inflación (Argentina)')
+
+    value_choice = st.radio(
+        "¿Quieres ingresar el valor para la fecha de inicio o la fecha de fin?",
+        ('Fecha de Inicio', 'Fecha de Fin'),
+        key='value_choice_radio'
     )
 
-    try:
-        start_inflation = daily_cpi.loc[pd.to_datetime(start_date)]
-        end_inflation = daily_cpi.loc[pd.to_datetime(end_date)]
-        end_value = start_value * (end_inflation / start_inflation)
-        st.write(f"Valor inicial el {start_date}: ARS {start_value}")
-        st.write(f"Valor ajustado el {end_date}: ARS {end_value:.2f}")
-    except KeyError as e:
-        st.error(f"Error al obtener la inflación para las fechas seleccionadas: {e}")
-        st.stop()
+    if value_choice == 'Fecha de Inicio':
+        start_date = st.date_input(
+            'Selecciona la fecha de inicio:',
+            min_value=daily_cpi.index.min().date(),
+            max_value=daily_cpi.index.max().date(),
+            value=daily_cpi.index.min().date(),
+            key='start_date_input'
+        )
+        end_date = st.date_input(
+            'Selecciona la fecha de fin:',
+            min_value=daily_cpi.index.min().date(),
+            max_value=daily_cpi.index.max().date(),
+            value=daily_cpi.index.max().date(),
+            key='end_date_input'
+        )
+        start_value = st.number_input(
+            'Ingresa el valor en la fecha de inicio (en ARS):',
+            min_value=0.0,
+            value=100.0,
+            key='start_value_input'
+        )
 
-else:
-    start_date = st.date_input(
-        'Selecciona la fecha de inicio:',
-        min_value=daily_cpi.index.min().date(),
-        max_value=daily_cpi.index.max().date(),
-        value=daily_cpi.index.min().date(),
-        key='start_date_end_date_input'
-    )
-    end_date = st.date_input(
-        'Selecciona la fecha de fin:',
-        min_value=start_date,
-        max_value=daily_cpi.index.max().date(),
-        value=daily_cpi.index.max().date(),
-        key='end_date_end_date_input'
-    )
-    end_value = st.number_input(
-        'Ingresa el valor en la fecha de fin (en ARS):',
-        min_value=0.0,
-        value=100.0,
-        key='end_value_input'
-    )
-
-    try:
-        start_inflation = daily_cpi.loc[pd.to_datetime(start_date)]
-        end_inflation = daily_cpi.loc[pd.to_datetime(end_date)]
-        start_value = end_value / (end_inflation / start_inflation)
-        st.write(f"Valor ajustado el {start_date}: ARS {start_value:.2f}")
-        st.write(f"Valor final el {end_date}: ARS {end_value}")
-    except KeyError as e:
-        st.error(f"Error al obtener la inflación para las fechas seleccionadas: {e}")
-        st.stop()
-
-# ------------------------------
-# Ajustadora de acciones por inflación
-st.subheader('2- Ajustadora de acciones por inflación')
-
-tickers_input = st.text_input(
-    'Ingresa los tickers de acciones separados por comas (por ejemplo, AAPL.BA, MSFT.BA, META):',
-    key='tickers_input'
-)
-
-sma_period = st.number_input(
-    'Ingresa el número de periodos para el SMA del primer ticker:',
-    min_value=1,
-    value=10,
-    key='sma_period_input'
-)
-
-plot_start_date = st.date_input(
-    'Selecciona la fecha de inicio para los datos mostrados en el gráfico:',
-    min_value=daily_cpi.index.min().date(),
-    max_value=daily_cpi.index.max().date(),
-    value=(daily_cpi.index.max() - timedelta(days=365)).date(),
-    key='plot_start_date_input'
-)
-
-show_percentage = st.checkbox('Mostrar valores ajustados por inflación como porcentajes', value=False)
-show_percentage_from_recent = st.checkbox(
-    'Mostrar valores ajustados por inflación como porcentajes desde el valor más reciente',
-    value=False
-)
-
-# Diccionarios para almacenar datos
-stock_data_dict_nominal = {}
-stock_data_dict_adjusted = {}
-
-if tickers_input:
-    tickers = [ticker.strip().upper() for ticker in tickers_input.split(',')]
-    fig = go.Figure()
-    ticker_var_map = {ticker: ticker.replace('.', '_') for ticker in tickers}
-
-    for i, ticker in enumerate(tickers):
         try:
-            stock_data = descargar_datos(ticker, plot_start_date, daily_cpi.index.max().date() + timedelta(days=1), data_source)
+            start_inflation = daily_cpi.loc[pd.to_datetime(start_date)]
+            end_inflation = daily_cpi.loc[pd.to_datetime(end_date)]
+            end_value = start_value * (end_inflation / start_inflation)
+            st.write(f"Valor inicial el {start_date}: ARS {start_value}")
+            st.write(f"Valor ajustado el {end_date}: ARS {end_value:.2f}")
+        except KeyError as e:
+            st.error(f"Error al obtener la inflación para las fechas seleccionadas: {e}")
 
-            if stock_data.empty:
-                st.error(f"No se encontraron datos para el ticker {ticker}.")
+    else:
+        start_date = st.date_input(
+            'Selecciona la fecha de inicio:',
+            min_value=daily_cpi.index.min().date(),
+            max_value=daily_cpi.index.max().date(),
+            value=daily_cpi.index.min().date(),
+            key='start_date_end_date_input'
+        )
+        end_date = st.date_input(
+            'Selecciona la fecha de fin:',
+            min_value=start_date,
+            max_value=daily_cpi.index.max().date(),
+            value=daily_cpi.index.max().date(),
+            key='end_date_end_date_input'
+        )
+        end_value = st.number_input(
+            'Ingresa el valor en la fecha de fin (en ARS):',
+            min_value=0.0,
+            value=100.0,
+            key='end_value_input'
+        )
+
+        try:
+            start_inflation = daily_cpi.loc[pd.to_datetime(start_date)]
+            end_inflation = daily_cpi.loc[pd.to_datetime(end_date)]
+            start_value = end_value / (end_inflation / start_inflation)
+            st.write(f"Valor ajustado el {start_date}: ARS {start_value:.2f}")
+            st.write(f"Valor final el {end_date}: ARS {end_value}")
+        except KeyError as e:
+            st.error(f"Error al obtener la inflación para las fechas seleccionadas: {e}")
+
+with tab2:
+    st.subheader('Ajustadora de acciones por inflación (Argentina)')
+
+    tickers_input = st.text_input(
+        'Ingresa los tickers de acciones separados por comas (por ejemplo, AAPL.BA, MSFT.BA, META):',
+        key='tickers_input_arg'
+    )
+
+    sma_period = st.number_input(
+        'Ingresa el número de periodos para el SMA del primer ticker:',
+        min_value=1,
+        value=10,
+        key='sma_period_input_arg'
+    )
+
+    plot_start_date = st.date_input(
+        'Selecciona la fecha de inicio para los datos mostrados en el gráfico:',
+        min_value=daily_cpi.index.min().date(),
+        max_value=daily_cpi.index.max().date(),
+        value=(daily_cpi.index.max() - timedelta(days=365)).date(),
+        key='plot_start_date_input_arg'
+    )
+
+    show_percentage = st.checkbox('Mostrar valores ajustados por inflación como porcentajes', value=False, key='show_percentage_arg')
+    show_percentage_from_recent = st.checkbox(
+        'Mostrar valores ajustados por inflación como porcentajes desde el valor más reciente',
+        value=False,
+        key='show_percentage_from_recent_arg'
+    )
+
+    # Diccionarios para almacenar datos (for Argentine tab)
+    stock_data_dict_nominal_arg = {}
+    stock_data_dict_adjusted_arg = {}
+
+    if tickers_input:
+        tickers = [ticker.strip().upper() for ticker in tickers_input.split(',')]
+        fig = go.Figure()
+        ticker_var_map = {ticker: ticker.replace('.', '_') for ticker in tickers}
+
+        for i, ticker in enumerate(tickers):
+            try:
+                stock_data = descargar_datos(ticker, plot_start_date, daily_cpi.index.max().date() + timedelta(days=1), data_source)
+
+                if stock_data.empty:
+                    st.error(f"No se encontraron datos para el ticker {ticker}.")
+                    continue
+
+                if 'Date' in stock_data.columns:
+                    stock_data.set_index('Date', inplace=True)
+                stock_data.index = pd.to_datetime(stock_data.index)
+                if stock_data.index.tz is not None:
+                    stock_data.index = stock_data.index.tz_localize(None)
+
+                if data_source in ['IOL (Invertir Online)', 'ByMA Data']:
+                    if len(stock_data.columns) == 1:
+                        stock_data = stock_data.rename(columns={stock_data.columns[0]: 'Close'})
+
+                stock_data.index = stock_data.index.tz_localize(None)
+                stock_data.index = stock_data.index.normalize()
+
+                stock_data = ajustar_precios_por_splits(stock_data, ticker)
+
+                needs_inflation_adjustment = (
+                    (data_source == 'YFinance' and (ticker.endswith('.BA') or ticker == '^MERV')) or
+                    (data_source != 'YFinance')
+                )
+
+                if needs_inflation_adjustment and not stock_data.empty:
+                    daily_cpi_clean = daily_cpi.copy()
+                    daily_cpi_clean.index = pd.to_datetime(daily_cpi_clean.index).normalize()
+                    stock_data = pd.merge(
+                        stock_data,
+                        daily_cpi_clean,
+                        left_index=True,
+                        right_index=True,
+                        how='left'
+                    )
+                    stock_data['Cumulative_Inflation'] = stock_data['Cumulative_Inflation'].ffill().bfill()
+                    if not stock_data.empty:
+                        last_cpi = stock_data['Cumulative_Inflation'].iloc[-1]
+                        stock_data['Inflation_Adjusted_Close'] = stock_data['Close'] * (
+                            last_cpi / stock_data['Cumulative_Inflation']
+                        )
+                    else:
+                        stock_data['Inflation_Adjusted_Close'] = stock_data['Close']
+                else:
+                    stock_data['Inflation_Adjusted_Close'] = stock_data['Close']
+
+                if stock_data.empty:
+                    st.error(f"No hay datos suficientes para procesar {ticker}.")
+                    continue
+
+                var_name = ticker_var_map[ticker]
+                stock_data_dict_nominal_arg[var_name] = stock_data['Close']
+                stock_data_dict_adjusted_arg[var_name] = stock_data['Inflation_Adjusted_Close']
+
+                display_name = f'{ticker[:10]}...' if len(ticker) > 10 else ticker
+
+                if show_percentage or show_percentage_from_recent:
+                    if show_percentage_from_recent and len(stock_data) > 0:
+                        pct_change = ((stock_data['Inflation_Adjusted_Close'].iloc[-1] /
+                                       stock_data['Inflation_Adjusted_Close']) - 1) * 100
+                        pct_change = pct_change.clip(lower=-100)
+                    else:
+                        pct_change = (stock_data['Inflation_Adjusted_Close'] /
+                                      stock_data['Inflation_Adjusted_Close'].iloc[0] - 1) * 100
+
+                    fig.add_trace(
+                        go.Scatter(
+                            x=stock_data.index,
+                            y=pct_change,
+                            mode='lines',
+                            name=f'{display_name} (%)',
+                            line=dict(color=colors[i % len(colors)], width=1.5),
+                            yaxis='y1',
+                            hovertemplate='Fecha: %{x|%Y-%m-%d}<br>Variación: %{y:.2f}%<extra></extra>'
+                        )
+                    )
+                    fig.add_shape(
+                        type="line",
+                        x0=stock_data.index.min(),
+                        x1=stock_data.index.max(),
+                        y0=0,
+                        y1=0,
+                        line=dict(color="rgba(255, 0, 0, 0.5)", width=1, dash="dash"),
+                        xref="x",
+                        yref="y1"
+                    )
+                else:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=stock_data.index,
+                            y=stock_data['Inflation_Adjusted_Close'],
+                            mode='lines',
+                            name=display_name,
+                            line=dict(color=colors[i % len(colors)], width=1.5),
+                            yaxis='y1',
+                            hovertemplate='Fecha: %{x|%Y-%m-%d}<br>Precio: %{y:.2f} ARS<extra></extra>'
+                        )
+                    )
+                    avg_price = stock_data['Inflation_Adjusted_Close'].mean()
+                    fig.add_trace(
+                        go.Scatter(
+                            x=stock_data.index,
+                            y=[avg_price] * len(stock_data),
+                            mode='lines',
+                            name=f'{display_name} Avg',
+                            line=dict(color=colors[i % len(colors)], width=0.8, dash='dot'),
+                            yaxis='y1',
+                            hovertemplate='Fecha: %{x|%Y-%m-%d}<br>Promedio: %{y:.2f} ARS<extra></extra>'
+                        )
+                    )
+
+                if i == 0 and len(stock_data) > 0:
+                    stock_data['SMA'] = stock_data['Inflation_Adjusted_Close'].rolling(window=sma_period).mean()
+                    fig.add_trace(
+                        go.Scatter(
+                            x=stock_data.index,
+                            y=stock_data['SMA'],
+                            mode='lines',
+                            name=f'{display_name} SMA',
+                            line=dict(color='orange', width=1),
+                            yaxis='y1',
+                            hovertemplate='Fecha: %{x|%Y-%m-%d}<br>SMA: %{y:.2f} ARS<extra></extra>'
+                        )
+                    )
+
+                # Add split annotations
+                for split in st.session_state.custom_splits:
+                    if split["ticker"] == ticker:
+                        fig.add_vline(
+                            x=datetime.combine(split["date"], datetime.min.time()).timestamp() * 1000,
+                            line=dict(color="white", width=1, dash="dash"),
+                            annotation_text=f"Split {split['ratio']}:1",
+                            annotation_position="top",
+                            annotation=dict(font=dict(color='white'))
+                        )
+                # Add event annotations
+                for event in st.session_state.custom_events:
+                    if event["ticker"] == ticker:
+                        fig.add_vline(
+                            x=datetime.combine(event["date"], datetime.min.time()).timestamp() * 1000,
+                            line=dict(color="yellow", width=1, dash="dot"),
+                            annotation_text=event["description"],
+                            annotation_position="top",
+                            annotation=dict(font=dict(color='yellow'))
+                        )
+            except Exception as e:
+                st.error(f"Error procesando {ticker}: {e}")
+                logger.error(f"Error processing {ticker}: {e}")
                 continue
 
-            if 'Date' in stock_data.columns:
-                stock_data.set_index('Date', inplace=True)
-            stock_data.index = pd.to_datetime(stock_data.index)
-            if stock_data.index.tz is not None:
-                stock_data.index = stock_data.index.tz_localize(None)
+        fig.add_annotation(
+            text="MTaurus - X: mtaurus_ok",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5,
+            showarrow=False,
+            font=dict(size=30, color="rgba(255, 255, 255, 0.2)"),
+            opacity=0.15
+        )
 
-            if data_source in ['IOL (Invertir Online)', 'ByMA Data']:
-                if len(stock_data.columns) == 1:
-                    stock_data = stock_data.rename(columns={stock_data.columns[0]: 'Close'})
+        fig.update_layout(
+            title=dict(
+                text='Precios Históricos Ajustados por Inflación' if not (show_percentage or show_percentage_from_recent) else 'Precios Históricos Ajustados por Inflación (%)',
+                font=dict(size=20, color='white')
+            ),
+            xaxis_title=dict(text='Fecha', font=dict(size=14, color='white')),
+            yaxis_title=dict(
+                text='Precio de Cierre Ajustado (ARS)' if not (show_percentage or show_percentage_from_recent) else 'Variación Porcentual (%)',
+                font=dict(size=14, color='white')
+            ),
+            **plot_style
+        )
 
-            stock_data.index = stock_data.index.tz_localize(None)
-            stock_data.index = stock_data.index.normalize()
+        st.plotly_chart(fig)
 
-            stock_data = ajustar_precios_por_splits(stock_data, ticker)
+with tab3:
+    st.subheader('Cálculos o Ratios Personalizados')
 
-            needs_inflation_adjustment = (
-                (data_source == 'YFinance' and (ticker.endswith('.BA') or ticker == '^MERV')) or
-                (data_source != 'YFinance')
-            )
+    st.markdown("""  
+        Puedes definir expresiones matemáticas personalizadas utilizando los tickers cargados.  
+        **Ejemplo:** `META*(YPFD.BA / YPF)/20`  
 
-            if needs_inflation_adjustment and not stock_data.empty:
-                daily_cpi_clean = daily_cpi.copy()
-                daily_cpi_clean.index = pd.to_datetime(daily_cpi_clean.index).normalize()
-                stock_data = pd.merge(
-                    stock_data,
-                    daily_cpi_clean,
-                    left_index=True,
-                    right_index=True,
-                    how='left'
+        **Instrucciones:**  
+        - Usa los tickers tal como los ingresaste (incluyendo `.BA` si corresponde).  
+        - Los tickers con puntos (`.`) serán automáticamente reemplazados por guiones bajos (`_`) en la evaluación.  
+        - Por lo tanto, la expresión anterior se transformará internamente a: `META*(YPFD_BA / YPF)/20`  
+        - Asegúrate de que todos los tickers utilizados en la expresión estén cargados y escritos correctamente.  
+        - Puedes usar operadores matemáticos básicos: `+`, `-`, `*`, `/`, `**`, etc.  
+        - Puedes usar funciones de `pandas` como `mean()`, `max()`, etc.  
+    """)
+
+    custom_expression = st.text_input(
+        'Ingresa una expresión personalizada usando los tickers cargados, operadores matemáticos y funciones:',
+        placeholder='Por ejemplo: META*(YPFD.BA / YPF)/20',
+        key='custom_expression_input'
+    )
+
+    if custom_expression:
+        try:
+            sorted_tickers = sorted(ticker_var_map.keys(), key=len, reverse=True)
+            transformed_expression = custom_expression
+            used_ba_tickers = set()
+
+            used_tickers = []
+            for ticker in sorted_tickers:
+                if ticker in custom_expression:
+                    used_tickers.append(ticker)
+                    var_name = ticker_var_map[ticker]
+                    pattern = re.escape(ticker)
+                    transformed_expression = re.sub(rf'\b{pattern}\b', var_name, transformed_expression)
+                    if ticker.endswith('.BA'):
+                        used_ba_tickers.add(ticker)
+
+            combined_nominal_df = pd.DataFrame({
+                ticker_var_map[ticker]: stock_data_dict_nominal_arg[ticker_var_map[ticker]]
+                for ticker in used_tickers
+            })
+
+            combined_nominal_df.dropna(inplace=True)
+
+            if combined_nominal_df.empty:
+                st.error("No hay datos disponibles para todos los tickers seleccionados en las fechas especificadas.")
+            else:
+                custom_series_nominal = combined_nominal_df.eval(transformed_expression, engine='python')
+                custom_series_nominal = custom_series_nominal.to_frame(name='Custom_Nominal')
+
+                if used_ba_tickers:
+                    custom_series_nominal = custom_series_nominal.join(daily_cpi, how='inner')
+                    custom_series_nominal['Cumulative_Inflation'].ffill(inplace=True)
+                    custom_series_nominal.dropna(subset=['Cumulative_Inflation'], inplace=True)
+                    custom_series_nominal['Inflation_Adjusted_Custom'] = custom_series_nominal['Custom_Nominal'] * (
+                        custom_series_nominal['Cumulative_Inflation'].iloc[-1] / custom_series_nominal['Cumulative_Inflation']
+                    )
+                    adjusted_series = custom_series_nominal['Inflation_Adjusted_Custom']
+                else:
+                    adjusted_series = custom_series_nominal['Custom_Nominal']
+
+                fig = go.Figure()  # New figure for custom
+
+                if show_percentage or show_percentage_from_recent:
+                    if show_percentage_from_recent:
+                        custom_series_pct = (adjusted_series / adjusted_series.iloc[-1] - 1) * 100
+                        custom_series_pct = -custom_series_pct
+                    else:
+                        custom_series_pct = (adjusted_series / adjusted_series.iloc[0] - 1) * 100
+
+                    fig.add_trace(
+                        go.Scatter(
+                            x=custom_series_pct.index,
+                            y=custom_series_pct,
+                            mode='lines',
+                            name=f'Custom: {custom_expression[:10]}...' if len(custom_expression) > 10 else f'Custom: {custom_expression}',
+                            line=dict(color=colors[-1], width=1.5),
+                            yaxis='y1',
+                            hovertemplate='Fecha: %{x|%Y-%m-%d}<br>Variación: %{y:.2f}%<extra></extra>'
+                        )
+                    )
+                else:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=adjusted_series.index,
+                            y=adjusted_series,
+                            mode='lines',
+                            name=f'Custom: {custom_expression[:10]}...' if len(custom_expression) > 10 else f'Custom: {custom_expression}',
+                            line=dict(color=colors[-1], width=1.5),
+                            yaxis='y1',
+                            hovertemplate='Fecha: %{x|%Y-%m-%d}<br>Valor: %{y:.2f} ARS<extra></extra>'
+                        )
+                    )
+
+                fig.update_layout(
+                    title=dict(
+                        text='Precios Históricos Ajustados por Inflación' if not (show_percentage or show_percentage_from_recent) else 'Precios Históricos Ajustados por Inflación (%)',
+                        font=dict(size=20, color='white')
+                    ),
+                    xaxis_title=dict(text='Fecha', font=dict(size=14, color='white')),
+                    yaxis_title=dict(
+                        text='Precio de Cierre Ajustado (ARS)' if not (show_percentage or show_percentage_from_recent) else 'Variación Porcentual (%)',
+                        font=dict(size=14, color='white')
+                    ),
+                    **plot_style
                 )
-                stock_data['Cumulative_Inflation'] = stock_data['Cumulative_Inflation'].ffill().bfill()
-                if not stock_data.empty:
-                    last_cpi = stock_data['Cumulative_Inflation'].iloc[-1]
+
+                st.plotly_chart(fig)
+
+        except Exception as e:
+            available_vars = ', '.join([v for v in ticker_var_map.values()])
+            st.error(
+                f"Error al evaluar la expresión personalizada: {e}\n\n**Nombres de variables disponibles:** {available_vars}")
+
+with tab4:
+    st.subheader('Comparación de Volatilidad Histórica Ajustada por Inflación y Precio Ajustado por Inflación (Argentina)')
+
+    selected_ticker = st.text_input(
+        'Ingresa una acción para analizar la volatilidad histórica (puede ser cualquier ticker):',
+        placeholder='Por ejemplo: AAPL, AAPL.BA',
+        key='selected_ticker_input'
+    )
+
+    vol_comparison_start_date = st.date_input(
+        'Selecciona la fecha de inicio para la comparación:',
+        min_value=daily_cpi.index.min().date(),
+        max_value=daily_cpi.index.max().date(),
+        value=(daily_cpi.index.max() - timedelta(days=365)).date(),
+        key='vol_comparison_start_date_input'
+    )
+
+    vol_comparison_end_date = st.date_input(
+        'Selecciona la fecha de fin para la comparación:',
+        min_value=vol_comparison_start_date,
+        max_value=daily_cpi.index.max().date(),
+        value=daily_cpi.index.max().date(),
+        key='vol_comparison_end_date_input'
+    )
+
+    volatility_window = st.number_input(
+        'Selecciona el número de periodos para calcular la volatilidad histórica:',
+        min_value=1,
+        value=20,
+        key='volatility_window_input'
+    )
+
+    if selected_ticker:
+        ticker = selected_ticker.strip().upper()
+        try:
+            stock_data = descargar_datos(ticker, vol_comparison_start_date, vol_comparison_end_date, data_source)
+
+            if not stock_data.empty:
+                stock_data.index = pd.to_datetime(stock_data.index).tz_localize(None)
+                stock_data = ajustar_precios_por_splits(stock_data, ticker)
+
+                if ticker.endswith('.BA'):
+                    stock_data = stock_data.join(daily_cpi, how='left')
+                    stock_data['Cumulative_Inflation'].ffill(inplace=True)
+                    stock_data.dropna(subset=['Cumulative_Inflation'], inplace=True)
                     stock_data['Inflation_Adjusted_Close'] = stock_data['Close'] * (
-                        last_cpi / stock_data['Cumulative_Inflation']
+                        stock_data['Cumulative_Inflation'].iloc[-1] / stock_data['Cumulative_Inflation']
                     )
                 else:
                     stock_data['Inflation_Adjusted_Close'] = stock_data['Close']
-            else:
-                stock_data['Inflation_Adjusted_Close'] = stock_data['Close']
 
-            if stock_data.empty:
-                st.error(f"No hay datos suficientes para procesar {ticker}.")
-                continue
+                stock_data['Return_Adjusted'] = stock_data['Inflation_Adjusted_Close'].pct_change()
+                stock_data['Volatility_Adjusted'] = stock_data['Return_Adjusted'].rolling(
+                    window=volatility_window).std() * (252 ** 0.5)
 
-            var_name = ticker_var_map[ticker]
-            stock_data_dict_nominal[var_name] = stock_data['Close']
-            stock_data_dict_adjusted[var_name] = stock_data['Inflation_Adjusted_Close']
+                latest_volatility = stock_data['Volatility_Adjusted'].dropna().iloc[-1]
+                st.write(f"**Volatilidad Histórica Ajustada por Inflación (ventana {volatility_window}):** {latest_volatility:.2%}")
 
-            display_name = f'{ticker[:10]}...' if len(ticker) > 10 else ticker
+                fig_vol = go.Figure()
 
-            if show_percentage or show_percentage_from_recent:
-                if show_percentage_from_recent and len(stock_data) > 0:
-                    pct_change = ((stock_data['Inflation_Adjusted_Close'].iloc[-1] /
-                                   stock_data['Inflation_Adjusted_Close']) - 1) * 100
-                    pct_change = pct_change.clip(lower=-100)
-                else:
-                    pct_change = (stock_data['Inflation_Adjusted_Close'] /
-                                  stock_data['Inflation_Adjusted_Close'].iloc[0] - 1) * 100
+                display_name = f'{ticker[:10]}...' if len(ticker) > 10 else ticker
 
-                fig.add_trace(
-                    go.Scatter(
-                        x=stock_data.index,
-                        y=pct_change,
-                        mode='lines',
-                        name=f'{display_name} (%)',
-                        line=dict(color=colors[i % len(colors)], width=1.5),
-                        yaxis='y1',
-                        hovertemplate='Fecha: %{x|%Y-%m-%d}<br>Variación: %{y:.2f}%<extra></extra>'
-                    )
-                )
-                fig.add_shape(
-                    type="line",
-                    x0=stock_data.index.min(),
-                    x1=stock_data.index.max(),
-                    y0=0,
-                    y1=0,
-                    line=dict(color="rgba(255, 0, 0, 0.5)", width=1, dash="dash"),
-                    xref="x",
-                    yref="y1"
-                )
-            else:
-                fig.add_trace(
+                fig_vol.add_trace(
                     go.Scatter(
                         x=stock_data.index,
                         y=stock_data['Inflation_Adjusted_Close'],
                         mode='lines',
-                        name=display_name,
-                        line=dict(color=colors[i % len(colors)], width=1.5),
+                        name=f'{display_name} Precio Ajustado',
+                        line=dict(color=colors[0], width=1.5),
                         yaxis='y1',
                         hovertemplate='Fecha: %{x|%Y-%m-%d}<br>Precio: %{y:.2f} ARS<extra></extra>'
                     )
                 )
-                avg_price = stock_data['Inflation_Adjusted_Close'].mean()
-                fig.add_trace(
+
+                fig_vol.add_trace(
                     go.Scatter(
                         x=stock_data.index,
-                        y=[avg_price] * len(stock_data),
+                        y=stock_data['Volatility_Adjusted'],
                         mode='lines',
-                        name=f'{display_name} Avg',
-                        line=dict(color=colors[i % len(colors)], width=0.8, dash='dot'),
-                        yaxis='y1',
-                        hovertemplate='Fecha: %{x|%Y-%m-%d}<br>Promedio: %{y:.2f} ARS<extra></extra>'
+                        name=f'{display_name} Volatilidad',
+                        line=dict(color=colors[1], width=1.5),
+                        yaxis='y2',
+                        hovertemplate='Fecha: %{x|%Y-%m-%d}<br>Volatilidad: %{y:.2%}<extra></extra>'
                     )
                 )
 
-            if i == 0 and len(stock_data) > 0:
-                stock_data['SMA'] = stock_data['Inflation_Adjusted_Close'].rolling(window=sma_period).mean()
-                fig.add_trace(
-                    go.Scatter(
-                        x=stock_data.index,
-                        y=stock_data['SMA'],
-                        mode='lines',
-                        name=f'{display_name} SMA',
-                        line=dict(color='orange', width=1),
-                        yaxis='y1',
-                        hovertemplate='Fecha: %{x|%Y-%m-%d}<br>SMA: %{y:.2f} ARS<extra></extra>'
-                    )
+                for split in st.session_state.custom_splits:
+                    if split["ticker"] == ticker:
+                        fig_vol.add_vline(
+                            x=datetime.combine(split["date"], datetime.min.time()).timestamp() * 1000,
+                            line=dict(color="white", width=1, dash="dash"),
+                            annotation_text=f"Split {split['ratio']}:1",
+                            annotation_position="top",
+                            annotation=dict(font=dict(color='white'))
+                        )
+
+                fig_vol.add_annotation(
+                    text="MTaurus - X: mtaurus_ok",
+                    xref="paper", yref="paper",
+                    x=0.02, y=0.02,
+                    showarrow=False,
+                    font=dict(size=20, color="rgba(255, 255, 255, 0.2)"),
+                    opacity=0.1
                 )
 
-            # Add split annotations
-            for split in st.session_state.custom_splits:
-                if split["ticker"] == ticker:
-                    fig.add_vline(
-                        x=datetime.combine(split["date"], datetime.min.time()).timestamp() * 1000,
-                        line=dict(color="white", width=1, dash="dash"),
-                        annotation_text=f"Split {split['ratio']}:1",
-                        annotation_position="top",
-                        annotation=dict(font=dict(color='white'))
-                    )
-            # Add event annotations
-            for event in st.session_state.custom_events:
-                if event["ticker"] == ticker:
-                    fig.add_vline(
-                        x=datetime.combine(event["date"], datetime.min.time()).timestamp() * 1000,
-                        line=dict(color="yellow", width=1, dash="dot"),
-                        annotation_text=event["description"],
-                        annotation_position="top",
-                        annotation=dict(font=dict(color='yellow'))
-                    )
+                fig_vol.update_layout(
+                    title=dict(
+                        text=f'Precio Ajustado por Inflación y Volatilidad Histórica de {display_name}',
+                        font=dict(size=20, color='white')
+                    ),
+                    xaxis_title=dict(text='Fecha', font=dict(size=14, color='white')),
+                    yaxis=dict(
+                        title='Precio de Cierre Ajustado (ARS)',
+                        titlefont=dict(color='white', size=14),
+                        tickfont=dict(color='white'),
+                        tickformat=".2f",
+                        ticksuffix=" ARS"
+                    ),
+                    yaxis2=dict(
+                        title='Volatilidad Histórica (Anualizada)',
+                        titlefont=dict(color='white', size=14),
+                        tickfont=dict(color='white'),
+                        tickformat=".2%",
+                        overlaying='y',
+                        side='right'
+                    ),
+                    **plot_style
+                )
+
+                st.plotly_chart(fig_vol)
+
+            else:
+                st.error(f"No se encontraron datos para el ticker {ticker}.")
+
         except Exception as e:
-            st.error(f"Error procesando {ticker}: {e}")
-            logger.error(f"Error processing {ticker}: {e}")
-            continue
+            st.error(f"Error al procesar los datos de volatilidad para {ticker}: {e}")
+            logger.error(f"Error processing volatility data for {ticker}: {e}")
 
-    fig.add_annotation(
-        text="MTaurus - X: mtaurus_ok",
-        xref="paper", yref="paper",
-        x=0.5, y=0.5,
-        showarrow=False,
-        font=dict(size=30, color="rgba(255, 255, 255, 0.2)"),
-        opacity=0.15
+with tab5:
+    st.subheader('Ajustadora de acciones por inflación (USA)')
+
+    tickers_input_us = st.text_input(
+        'Ingresa los tickers de acciones separados por comas (por ejemplo, AAPL, MSFT, META.BA):',
+        key='tickers_input_us'
     )
 
-    fig.update_layout(
-        title=dict(
-            text='Precios Históricos Ajustados por Inflación' if not (show_percentage or show_percentage_from_recent) else 'Precios Históricos Ajustados por Inflación (%)',
-            font=dict(size=20, color='white')
-        ),
-        xaxis_title=dict(text='Fecha', font=dict(size=14, color='white')),
-        yaxis_title=dict(
-            text='Precio de Cierre Ajustado (ARS)' if not (show_percentage or show_percentage_from_recent) else 'Variación Porcentual (%)',
-            font=dict(size=14, color='white')
-        ),
-        **plot_style
+    sma_period_us = st.number_input(
+        'Ingresa el número de periodos para el SMA del primer ticker:',
+        min_value=1,
+        value=10,
+        key='sma_period_input_us'
     )
 
-    st.plotly_chart(fig)
+    plot_start_date_us = st.date_input(
+        'Selecciona la fecha de inicio para los datos mostrados en el gráfico:',
+        min_value=daily_us_cpi.index.min().date(),
+        max_value=daily_us_cpi.index.max().date(),
+        value=(daily_us_cpi.index.max() - timedelta(days=365)).date(),
+        key='plot_start_date_input_us'
+    )
 
-# ------------------------------
-# Custom Calculations Section
-st.subheader('3- Cálculos o Ratios Personalizados')
+    show_percentage_us = st.checkbox('Mostrar valores ajustados por inflación como porcentajes', value=False, key='show_percentage_us')
+    show_percentage_from_recent_us = st.checkbox(
+        'Mostrar valores ajustados por inflación como porcentajes desde el valor más reciente',
+        value=False,
+        key='show_percentage_from_recent_us'
+    )
 
-st.markdown("""  
-    Puedes definir expresiones matemáticas personalizadas utilizando los tickers cargados.  
-    **Ejemplo:** `META*(YPFD.BA / YPF)/20`  
+    # Diccionarios para almacenar datos (for US tab)
+    stock_data_dict_nominal_us = {}
+    stock_data_dict_adjusted_us = {}
 
-    **Instrucciones:**  
-    - Usa los tickers tal como los ingresaste (incluyendo `.BA` si corresponde).  
-    - Los tickers con puntos (`.`) serán automáticamente reemplazados por guiones bajos (`_`) en la evaluación.  
-    - Por lo tanto, la expresión anterior se transformará internamente a: `META*(YPFD_BA / YPF)/20`  
-    - Asegúrate de que todos los tickers utilizados en la expresión estén cargados y escritos correctamente.  
-    - Puedes usar operadores matemáticos básicos: `+`, `-`, `*`, `/`, `**`, etc.  
-    - Puedes usar funciones de `pandas` como `mean()`, `max()`, etc.  
-""")
+    if tickers_input_us:
+        tickers = [ticker.strip().upper() for ticker in tickers_input_us.split(',')]
+        fig_us = go.Figure()
+        ticker_var_map_us = {ticker: ticker.replace('.', '_') for ticker in tickers}
 
-custom_expression = st.text_input(
-    'Ingresa una expresión personalizada usando los tickers cargados, operadores matemáticos y funciones:',
-    placeholder='Por ejemplo: META*(YPFD.BA / YPF)/20',
-    key='custom_expression_input'
-)
+        for i, ticker in enumerate(tickers):
+            try:
+                stock_data = descargar_datos(ticker, plot_start_date_us, daily_us_cpi.index.max().date() + timedelta(days=1), data_source)
 
-if custom_expression:
-    try:
-        sorted_tickers = sorted(ticker_var_map.keys(), key=len, reverse=True)
-        transformed_expression = custom_expression
-        used_ba_tickers = set()
+                if stock_data.empty:
+                    st.error(f"No se encontraron datos para el ticker {ticker}.")
+                    continue
 
-        used_tickers = []
-        for ticker in sorted_tickers:
-            if ticker in custom_expression:
-                used_tickers.append(ticker)
-                var_name = ticker_var_map[ticker]
-                pattern = re.escape(ticker)
-                transformed_expression = re.sub(rf'\b{pattern}\b', var_name, transformed_expression)
-                if ticker.endswith('.BA'):
-                    used_ba_tickers.add(ticker)
+                if 'Date' in stock_data.columns:
+                    stock_data.set_index('Date', inplace=True)
+                stock_data.index = pd.to_datetime(stock_data.index)
+                if stock_data.index.tz is not None:
+                    stock_data.index = stock_data.index.tz_localize(None)
 
-        combined_nominal_df = pd.DataFrame({
-            ticker_var_map[ticker]: stock_data_dict_nominal[ticker_var_map[ticker]]
-            for ticker in used_tickers
-        })
+                if data_source in ['IOL (Invertir Online)', 'ByMA Data']:
+                    if len(stock_data.columns) == 1:
+                        stock_data = stock_data.rename(columns={stock_data.columns[0]: 'Close'})
 
-        combined_nominal_df.dropna(inplace=True)
+                stock_data.index = stock_data.index.tz_localize(None)
+                stock_data.index = stock_data.index.normalize()
 
-        if combined_nominal_df.empty:
-            st.error("No hay datos disponibles para todos los tickers seleccionados en las fechas especificadas.")
-            st.stop()
+                stock_data = ajustar_precios_por_splits(stock_data, ticker)
 
-        custom_series_nominal = combined_nominal_df.eval(transformed_expression, engine='python')
-        custom_series_nominal = custom_series_nominal.to_frame(name='Custom_Nominal')
+                # For US tab, always apply inflation adjustment (change if needed)
+                if not stock_data.empty:
+                    daily_us_cpi_clean = daily_us_cpi.copy()
+                    daily_us_cpi_clean.index = pd.to_datetime(daily_us_cpi_clean.index).normalize()
+                    stock_data = pd.merge(
+                        stock_data,
+                        daily_us_cpi_clean,
+                        left_index=True,
+                        right_index=True,
+                        how='left'
+                    )
+                    stock_data['Cumulative_Inflation'] = stock_data['Cumulative_Inflation'].ffill().bfill()
+                    if not stock_data.empty:
+                        last_cpi = stock_data['Cumulative_Inflation'].iloc[-1]
+                        stock_data['Inflation_Adjusted_Close'] = stock_data['Close'] * (
+                            last_cpi / stock_data['Cumulative_Inflation']
+                        )
+                    else:
+                        stock_data['Inflation_Adjusted_Close'] = stock_data['Close']
+                else:
+                    stock_data['Inflation_Adjusted_Close'] = stock_data['Close']
 
-        if used_ba_tickers:
-            custom_series_nominal = custom_series_nominal.join(daily_cpi, how='inner')
-            custom_series_nominal['Cumulative_Inflation'].ffill(inplace=True)
-            custom_series_nominal.dropna(subset=['Cumulative_Inflation'], inplace=True)
-            custom_series_nominal['Inflation_Adjusted_Custom'] = custom_series_nominal['Custom_Nominal'] * (
-                custom_series_nominal['Cumulative_Inflation'].iloc[-1] / custom_series_nominal['Cumulative_Inflation']
-            )
-            adjusted_series = custom_series_nominal['Inflation_Adjusted_Custom']
-        else:
-            adjusted_series = custom_series_nominal['Custom_Nominal']
+                if stock_data.empty:
+                    st.error(f"No hay datos suficientes para procesar {ticker}.")
+                    continue
 
-        if show_percentage or show_percentage_from_recent:
-            if show_percentage_from_recent:
-                custom_series_pct = (adjusted_series / adjusted_series.iloc[-1] - 1) * 100
-                custom_series_pct = -custom_series_pct
-            else:
-                custom_series_pct = (adjusted_series / adjusted_series.iloc[0] - 1) * 100
+                var_name = ticker_var_map_us[ticker]
+                stock_data_dict_nominal_us[var_name] = stock_data['Close']
+                stock_data_dict_adjusted_us[var_name] = stock_data['Inflation_Adjusted_Close']
 
-            fig.add_trace(
-                go.Scatter(
-                    x=custom_series_pct.index,
-                    y=custom_series_pct,
-                    mode='lines',
-                    name=f'Custom: {custom_expression[:10]}...' if len(custom_expression) > 10 else f'Custom: {custom_expression}',
-                    line=dict(color=colors[-1], width=1.5),
-                    yaxis='y1',
-                    hovertemplate='Fecha: %{x|%Y-%m-%d}<br>Variación: %{y:.2f}%<extra></extra>'
-                )
-            )
-        else:
-            fig.add_trace(
-                go.Scatter(
-                    x=adjusted_series.index,
-                    y=adjusted_series,
-                    mode='lines',
-                    name=f'Custom: {custom_expression[:10]}...' if len(custom_expression) > 10 else f'Custom: {custom_expression}',
-                    line=dict(color=colors[-1], width=1.5),
-                    yaxis='y1',
-                    hovertemplate='Fecha: %{x|%Y-%m-%d}<br>Valor: %{y:.2f} ARS<extra></extra>'
-                )
-            )
+                display_name = f'{ticker[:10]}...' if len(ticker) > 10 else ticker
 
-            fig.update_layout(
-                title=dict(
-                    text='Precios Históricos Ajustados por Inflación' if not (show_percentage or show_percentage_from_recent) else 'Precios Históricos Ajustados por Inflación (%)',
-                    font=dict(size=20, color='white')
-                ),
-                xaxis_title=dict(text='Fecha', font=dict(size=14, color='white')),
-                yaxis_title=dict(
-                    text='Precio de Cierre Ajustado (ARS)' if not (show_percentage or show_percentage_from_recent) else 'Variación Porcentual (%)',
-                    font=dict(size=14, color='white')
-                ),
-                **plot_style
-            )
+                if show_percentage_us or show_percentage_from_recent_us:
+                    if show_percentage_from_recent_us and len(stock_data) > 0:
+                        pct_change = ((stock_data['Inflation_Adjusted_Close'].iloc[-1] /
+                                       stock_data['Inflation_Adjusted_Close']) - 1) * 100
+                        pct_change = pct_change.clip(lower=-100)
+                    else:
+                        pct_change = (stock_data['Inflation_Adjusted_Close'] /
+                                      stock_data['Inflation_Adjusted_Close'].iloc[0] - 1) * 100
 
-
-        st.plotly_chart(fig)
-
-    except Exception as e:
-        available_vars = ', '.join([v for v in ticker_var_map.values()])
-        st.error(
-            f"Error al evaluar la expresión personalizada: {e}\n\n**Nombres de variables disponibles:** {available_vars}")
-
-# ------------------------------
-# Volatility Analysis Section
-st.subheader('4- Comparación de Volatilidad Histórica Ajustada por Inflación y Precio Ajustado por Inflación')
-
-selected_ticker = st.text_input(
-    'Ingresa una acción para analizar la volatilidad histórica (puede ser cualquier ticker):',
-    placeholder='Por ejemplo: AAPL, AAPL.BA',
-    key='selected_ticker_input'
-)
-
-vol_comparison_start_date = st.date_input(
-    'Selecciona la fecha de inicio para la comparación:',
-    min_value=daily_cpi.index.min().date(),
-    max_value=daily_cpi.index.max().date(),
-    value=(daily_cpi.index.max() - timedelta(days=365)).date(),
-    key='vol_comparison_start_date_input'
-)
-
-vol_comparison_end_date = st.date_input(
-    'Selecciona la fecha de fin para la comparación:',
-    min_value=vol_comparison_start_date,
-    max_value=daily_cpi.index.max().date(),
-    value=daily_cpi.index.max().date(),
-    key='vol_comparison_end_date_input'
-)
-
-volatility_window = st.number_input(
-    'Selecciona el número de periodos para calcular la volatilidad histórica:',
-    min_value=1,
-    value=20,
-    key='volatility_window_input'
-)
-
-if selected_ticker:
-    ticker = selected_ticker.strip().upper()
-    try:
-        stock_data = descargar_datos(ticker, vol_comparison_start_date, vol_comparison_end_date, data_source)
-
-        if not stock_data.empty:
-            stock_data.index = pd.to_datetime(stock_data.index).tz_localize(None)
-            stock_data = ajustar_precios_por_splits(stock_data, ticker)
-
-            if ticker.endswith('.BA'):
-                stock_data = stock_data.join(daily_cpi, how='left')
-                stock_data['Cumulative_Inflation'].ffill(inplace=True)
-                stock_data.dropna(subset=['Cumulative_Inflation'], inplace=True)
-                stock_data['Inflation_Adjusted_Close'] = stock_data['Close'] * (
-                    stock_data['Cumulative_Inflation'].iloc[-1] / stock_data['Cumulative_Inflation']
-                )
-            else:
-                stock_data['Inflation_Adjusted_Close'] = stock_data['Close']
-
-            stock_data['Return_Adjusted'] = stock_data['Inflation_Adjusted_Close'].pct_change()
-            stock_data['Volatility_Adjusted'] = stock_data['Return_Adjusted'].rolling(
-                window=volatility_window).std() * (252 ** 0.5)
-
-            latest_volatility = stock_data['Volatility_Adjusted'].dropna().il
-            st.write(f"**Volatilidad Histórica Ajustada por Inflación (ventana {volatility_window}):** {latest_volatility:.2%}")
-
-            fig_vol = go.Figure()
-
-            display_name = f'{ticker[:10]}...' if len(ticker) > 10 else ticker
-
-            fig_vol.add_trace(
-                go.Scatter(
-                    x=stock_data.index,
-                    y=stock_data['Inflation_Adjusted_Close'],
-                    mode='lines',
-                    name=f'{display_name} Precio Ajustado',
-                    line=dict(color=colors[0], width=1.5),
-                    yaxis='y1',
-                    hovertemplate='Fecha: %{x|%Y-%m-%d}<br>Precio: %{y:.2f} ARS<extra></extra>'
-                )
-            )
-
-            fig_vol.add_trace(
-                go.Scatter(
-                    x=stock_data.index,
-                    y=stock_data['Volatility_Adjusted'],
-                    mode='lines',
-                    name=f'{display_name} Volatilidad',
-                    line=dict(color=colors[1], width=1.5),
-                    yaxis='y2',
-                    hovertemplate='Fecha: %{x|%Y-%m-%d}<br>Volatilidad: %{y:.2%}<extra></extra>'
-                )
-            )
-
-            for split in st.session_state.custom_splits:
-                if split["ticker"] == ticker:
-                    fig_vol.add_vline(
-                        x=datetime.combine(split["date"], datetime.min.time()).timestamp() * 1000,
-                        line=dict(color="white", width=1, dash="dash"),
-                        annotation_text=f"Split {split['ratio']}:1",
-                        annotation_position="top",
-                        annotation=dict(font=dict(color='white'))
+                    fig_us.add_trace(
+                        go.Scatter(
+                            x=stock_data.index,
+                            y=pct_change,
+                            mode='lines',
+                            name=f'{display_name} (%)',
+                            line=dict(color=colors[i % len(colors)], width=1.5),
+                            yaxis='y1',
+                            hovertemplate='Fecha: %{x|%Y-%m-%d}<br>Variación: %{y:.2f}%<extra></extra>'
+                        )
+                    )
+                    fig_us.add_shape(
+                        type="line",
+                        x0=stock_data.index.min(),
+                        x1=stock_data.index.max(),
+                        y0=0,
+                        y1=0,
+                        line=dict(color="rgba(255, 0, 0, 0.5)", width=1, dash="dash"),
+                        xref="x",
+                        yref="y1"
+                    )
+                else:
+                    fig_us.add_trace(
+                        go.Scatter(
+                            x=stock_data.index,
+                            y=stock_data['Inflation_Adjusted_Close'],
+                            mode='lines',
+                            name=display_name,
+                            line=dict(color=colors[i % len(colors)], width=1.5),
+                            yaxis='y1',
+                            hovertemplate='Fecha: %{x|%Y-%m-%d}<br>Precio: %{y:.2f} USD<extra></extra>'  # Changed to USD for US context
+                        )
+                    )
+                    avg_price = stock_data['Inflation_Adjusted_Close'].mean()
+                    fig_us.add_trace(
+                        go.Scatter(
+                            x=stock_data.index,
+                            y=[avg_price] * len(stock_data),
+                            mode='lines',
+                            name=f'{display_name} Avg',
+                            line=dict(color=colors[i % len(colors)], width=0.8, dash='dot'),
+                            yaxis='y1',
+                            hovertemplate='Fecha: %{x|%Y-%m-%d}<br>Promedio: %{y:.2f} USD<extra></extra>'
+                        )
                     )
 
-            fig_vol.add_annotation(
-                text="MTaurus - X: mtaurus_ok",
-                xref="paper", yref="paper",
-                x=0.02, y=0.02,
-                showarrow=False,
-                font=dict(size=20, color="rgba(255, 255, 255, 0.2)"),
-                opacity=0.1
-            )
+                if i == 0 and len(stock_data) > 0:
+                    stock_data['SMA'] = stock_data['Inflation_Adjusted_Close'].rolling(window=sma_period_us).mean()
+                    fig_us.add_trace(
+                        go.Scatter(
+                            x=stock_data.index,
+                            y=stock_data['SMA'],
+                            mode='lines',
+                            name=f'{display_name} SMA',
+                            line=dict(color='orange', width=1),
+                            yaxis='y1',
+                            hovertemplate='Fecha: %{x|%Y-%m-%d}<br>SMA: %{y:.2f} USD<extra></extra>'
+                        )
+                    )
 
-            fig_vol.update_layout(
-                title=dict(
-                    text=f'Precio Ajustado por Inflación y Volatilidad Histórica de {display_name}',
-                    font=dict(size=20, color='white')
-                ),
-                xaxis_title=dict(text='Fecha', font=dict(size=14, color='white')),
-                yaxis=dict(
-                    title='Precio de Cierre Ajustado (ARS)',
-                    titlefont=dict(color='white', size=14),
-                    tickfont=dict(color='white'),
-                    tickformat=".2f",
-                    ticksuffix=" ARS"
-                ),
-                yaxis2=dict(
-                    title='Volatilidad Histórica (Anualizada)',
-                    titlefont=dict(color='white', size=14),
-                    tickfont=dict(color='white'),
-                    tickformat=".2%",
-                    overlaying='y',
-                    side='right'
-                ),
-                **plot_style
-            )
+                # Add split annotations
+                for split in st.session_state.custom_splits:
+                    if split["ticker"] == ticker:
+                        fig_us.add_vline(
+                            x=datetime.combine(split["date"], datetime.min.time()).timestamp() * 1000,
+                            line=dict(color="white", width=1, dash="dash"),
+                            annotation_text=f"Split {split['ratio']}:1",
+                            annotation_position="top",
+                            annotation=dict(font=dict(color='white'))
+                        )
+                # Add event annotations
+                for event in st.session_state.custom_events:
+                    if event["ticker"] == ticker:
+                        fig_us.add_vline(
+                            x=datetime.combine(event["date"], datetime.min.time()).timestamp() * 1000,
+                            line=dict(color="yellow", width=1, dash="dot"),
+                            annotation_text=event["description"],
+                            annotation_position="top",
+                            annotation=dict(font=dict(color='yellow'))
+                        )
+            except Exception as e:
+                st.error(f"Error procesando {ticker}: {e}")
+                logger.error(f"Error processing {ticker}: {e}")
+                continue
 
-            st.plotly_chart(fig_vol)
+        fig_us.add_annotation(
+            text="MTaurus - X: mtaurus_ok",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5,
+            showarrow=False,
+            font=dict(size=30, color="rgba(255, 255, 255, 0.2)"),
+            opacity=0.15
+        )
 
-        else:
-            st.error(f"No se encontraron datos para el ticker {ticker}.")
+        fig_us.update_layout(
+            title=dict(
+                text='Precios Históricos Ajustados por Inflación (USA)' if not (show_percentage_us or show_percentage_from_recent_us) else 'Precios Históricos Ajustados por Inflación (USA) (%)',
+                font=dict(size=20, color='white')
+            ),
+            xaxis_title=dict(text='Fecha', font=dict(size=14, color='white')),
+            yaxis_title=dict(
+                text='Precio de Cierre Ajustado (USD)' if not (show_percentage_us or show_percentage_from_recent_us) else 'Variación Porcentual (%)',
+                font=dict(size=14, color='white')
+            ),
+            **plot_style
+        )
 
-    except Exception as e:
-        st.error(f"Error al procesar los datos de volatilidad para {ticker}: {e}")
-        logger.error(f"Error processing volatility data for {ticker}: {e}")
+        st.plotly_chart(fig_us)
