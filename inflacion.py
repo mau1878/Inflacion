@@ -662,6 +662,12 @@ with tab2:
         key='show_percentage_from_recent_arg'
     )
 
+    is_percentage_mode = show_percentage or show_percentage_from_recent
+    if not is_percentage_mode:
+        use_log_scale_arg = st.checkbox('Usar escala logarítmica en el eje Y', value=False, key='use_log_scale_arg')
+    else:
+        use_log_scale_arg = False
+
     # Diccionarios para almacenar datos (for Argentine tab)
     stock_data_dict_nominal_arg = {}
     stock_data_dict_adjusted_arg = {}
@@ -730,7 +736,7 @@ with tab2:
 
                 display_name = f'{ticker[:10]}...' if len(ticker) > 10 else ticker
 
-                if show_percentage or show_percentage_from_recent:
+                if is_percentage_mode:
                     if show_percentage_from_recent and len(stock_data) > 0:
                         pct_change = ((stock_data['Inflation_Adjusted_Close'].iloc[-1] /
                                        stock_data['Inflation_Adjusted_Close']) - 1) * 100
@@ -835,15 +841,22 @@ with tab2:
 
         fig.update_layout(
             title=dict(
-                text='Precios Históricos Ajustados por Inflación' if not (show_percentage or show_percentage_from_recent) else 'Precios Históricos Ajustados por Inflación (%)',
+                text='Precios Históricos Ajustados por Inflación' if not is_percentage_mode else 'Precios Históricos Ajustados por Inflación (%)',
                 font=dict(size=20, color='white')
             ),
             xaxis_title=dict(text='Fecha', font=dict(size=14, color='white')),
             yaxis_title=dict(
-                text='Precio de Cierre Ajustado (ARS)' if not (show_percentage or show_percentage_from_recent) else 'Variación Porcentual (%)',
+                text='Precio de Cierre Ajustado (ARS)' if not is_percentage_mode else 'Variación Porcentual (%)',
                 font=dict(size=14, color='white')
             ),
             **plot_style
+        )
+
+        # Update yaxis for log scale and formatting
+        fig.update_yaxes(
+            type='log' if use_log_scale_arg else 'linear',
+            tickformat=',.2f' if not is_percentage_mode else ',.2f',
+            ticksuffix='' if not is_percentage_mode else '%'
         )
 
         st.plotly_chart(fig)
@@ -1078,7 +1091,7 @@ with tab4:
                         title='Precio de Cierre Ajustado (ARS)',
                         titlefont=dict(color='white', size=14),
                         tickfont=dict(color='white'),
-                        tickformat=".2f",
+                        tickformat=",.2f",
                         ticksuffix=" ARS"
                     ),
                     yaxis2=dict(
@@ -1130,6 +1143,12 @@ with tab5:
         value=False,
         key='show_percentage_from_recent_us'
     )
+
+    is_percentage_mode_us = show_percentage_us or show_percentage_from_recent_us
+    if not is_percentage_mode_us:
+        use_log_scale_us = st.checkbox('Usar escala logarítmica en el eje Y', value=False, key='use_log_scale_us')
+    else:
+        use_log_scale_us = False
 
     # Diccionarios para almacenar datos (for US tab)
     stock_data_dict_nominal_us = {}
@@ -1195,7 +1214,7 @@ with tab5:
 
                 display_name = f'{ticker[:10]}...' if len(ticker) > 10 else ticker
 
-                if show_percentage_us or show_percentage_from_recent_us:
+                if is_percentage_mode_us:
                     if show_percentage_from_recent_us and len(stock_data) > 0:
                         pct_change = ((stock_data['Inflation_Adjusted_Close'].iloc[-1] /
                                        stock_data['Inflation_Adjusted_Close']) - 1) * 100
@@ -1300,15 +1319,22 @@ with tab5:
 
         fig_us.update_layout(
             title=dict(
-                text='Precios Históricos Ajustados por Inflación (USA)' if not (show_percentage_us or show_percentage_from_recent_us) else 'Precios Históricos Ajustados por Inflación (USA) (%)',
+                text='Precios Históricos Ajustados por Inflación (USA)' if not is_percentage_mode_us else 'Precios Históricos Ajustados por Inflación (USA) (%)',
                 font=dict(size=20, color='white')
             ),
             xaxis_title=dict(text='Fecha', font=dict(size=14, color='white')),
             yaxis_title=dict(
-                text='Precio de Cierre Ajustado (USD)' if not (show_percentage_us or show_percentage_from_recent_us) else 'Variación Porcentual (%)',
+                text='Precio de Cierre Ajustado (USD)' if not is_percentage_mode_us else 'Variación Porcentual (%)',
                 font=dict(size=14, color='white')
             ),
             **plot_style
+        )
+
+        # Update yaxis for log scale and formatting
+        fig_us.update_yaxes(
+            type='log' if use_log_scale_us else 'linear',
+            tickformat=',.2f' if not is_percentage_mode_us else ',.2f',
+            ticksuffix='' if not is_percentage_mode_us else '%'
         )
 
         st.plotly_chart(fig_us)
