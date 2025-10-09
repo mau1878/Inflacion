@@ -679,6 +679,8 @@ with tab2:
         key='plot_start_date_input_arg'
     )
 
+    force_inflation_arg = st.checkbox('Aplicar ajuste por inflación a todos los tickers (incluyendo no-.BA)', value=False, key='force_inflation_arg')
+
     show_percentage = st.checkbox('Mostrar valores ajustados por inflación como porcentajes', value=False, key='show_percentage_arg')
     show_percentage_from_recent = st.checkbox(
         'Mostrar valores ajustados por inflación como porcentajes desde el valor más reciente',
@@ -724,7 +726,7 @@ with tab2:
 
                 stock_data = ajustar_precios_por_splits(stock_data, ticker)
 
-                needs_inflation_adjustment = (
+                needs_inflation_adjustment = force_inflation_arg or (
                     (data_source == 'YFinance' and (ticker.endswith('.BA') or ticker == '^MERV')) or
                     (data_source != 'YFinance')
                 )
