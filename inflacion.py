@@ -316,6 +316,13 @@ def descargar_datos_byma(ticker, start_date, end_date):
 
 @st.cache_data(ttl=86400)
 def descargar_datos(ticker, start, end, source='YFinance'):
+    ticker_upper = ticker.upper()
+    if "uploaded_data" in st.session_state and ticker_upper in st.session_state.uploaded_data:
+        df = st.session_state.uploaded_data[ticker_upper]
+        start_dt = pd.to_datetime(start)
+        end_dt = pd.to_datetime(end)
+        df = df[(df.index >= start_dt) & (df.index <= end_dt)]
+        return df
     try:
         if source == 'YFinance':
             df = descargar_datos_yfinance(ticker, start, end)
@@ -474,6 +481,23 @@ st.sidebar.markdown("""
 
 *Nota: Algunos tickers pueden no estar disponibles en todas las fuentes.*
 """)
+
+st.sidebar.subheader("Cargar datos personalizados desde CSV")
+if "uploaded_data" not in st.session_state:
+    st.session_state.uploaded_data = {}
+uploaded_files = st.sidebar.file_uploader("Subir archivos CSV", type=['csv'], accept_multiple_files=True)
+for uploaded_file in uploaded_files:
+    filename = uploaded_file.name.lower()
+    ticker = filename.replace('_d.csv', '').replace('.csv', '').upper()
+    try:
+        df = pd.read_csv(uploaded_file, parse_dates=['Date'], index_col='Date')
+        if 'Close' not in df.columns:
+            st.sidebar.error(f"El CSV {uploaded_file.name} debe tener columna 'Close'.")
+            continue
+        st.session_state.uploaded_data[ticker] = df[['Close']]
+        st.sidebar.success(f"Datos cargados para {ticker} desde {uploaded_file.name}")
+    except Exception as e:
+        st.sidebar.error(f"Error al cargar {uploaded_file.name}: {e}")
 
 st.sidebar.subheader("Ajustes Manuales de Splits")
 
