@@ -898,7 +898,7 @@ with tab3:
         - Usa los tickers tal como los ingresaste (incluyendo `.BA` si corresponde).  
         - Los tickers con puntos (`.`) serán automáticamente reemplazados por guiones bajos (`_`) en la evaluación.  
         - Por lo tanto, la expresión anterior se transformará internamente a: `META*(YPFD_BA / YPF)/20`  
-        - Asegú sure que todos los tickers utilizados en la expresión estén cargados y escritos correctamente.  
+        - Asegúrate de que todos los tickers utilizados en la expresión estén cargados y escritos correctamente.  
         - Puedes usar operadores matemáticos básicos: `+`, `-`, `*`, `/`, `**`, etc.  
         - Puedes usar funciones de `pandas` como `mean()`, `max()`, etc.  
     """)
@@ -909,15 +909,22 @@ with tab3:
         key='custom_expression_input'
     )
 
+    # ←←← NUEVO CAMPO PARA TÍTULO PERSONALIZADO ←←←
+    custom_title = st.text_input(
+        'Título personalizado del gráfico (opcional):',
+        placeholder='Dejar vacío para título automático',
+        key='custom_title_input'
+    )
+
     if custom_expression:
         try:
             # ------------------------------------------------------------------
-            # 1. Detect which tickers are actually used in the expression
+            # 1. Detectar tickers usados en la expresión
             # ------------------------------------------------------------------
             sorted_tickers = sorted(ticker_var_map.keys(), key=len, reverse=True)
             transformed_expression = custom_expression
-            used_tickers = set()          # tickers realmente usados
-            used_ba_tickers = set()       # solo para saber si hay que ajustar inflación
+            used_tickers = set()
+            used_ba_tickers = set()
 
             for ticker in sorted_tickers:
                 if ticker in custom_expression:
@@ -929,7 +936,7 @@ with tab3:
                         used_ba_tickers.add(ticker)
 
             # ------------------------------------------------------------------
-            # 2. Build combined dataframe with only the tickers used
+            # 2. DataFrame combinado
             # ------------------------------------------------------------------
             combined_nominal_df = pd.DataFrame({
                 ticker_var_map[ticker]: stock_data_dict_nominal_arg[ticker_var_map[ticker]]
@@ -941,13 +948,13 @@ with tab3:
                 st.error("No hay datos disponibles para todos los tickers seleccionados en las fechas especificadas.")
             else:
                 # ------------------------------------------------------------------
-                # 3. Evaluate the custom expression
+                # 3. Evaluar expresión
                 # ------------------------------------------------------------------
                 custom_series_nominal = combined_nominal_df.eval(transformed_expression, engine='python')
                 custom_series_nominal = custom_series_nominal.to_frame(name='Custom_Nominal')
 
                 # ------------------------------------------------------------------
-                # 4. Inflation-adjust if any .BA ticker is present
+                # 4. Ajuste por inflación si hay algún .BA
                 # ------------------------------------------------------------------
                 if used_ba_tickers:
                     custom_series_nominal = custom_series_nominal.join(daily_cpi, how='inner')
@@ -961,11 +968,11 @@ with tab3:
                     adjusted_series = custom_series_nominal['Custom_Nominal']
 
                 # ------------------------------------------------------------------
-                # 5. Create the Plotly figure
+                # 5. Gráfico
                 # ------------------------------------------------------------------
                 fig = go.Figure()
 
-                # ------------------ Custom Events (vertical lines) ------------------
+                # ── Eventos personalizados ──
                 if "custom_events" in st.session_state and used_tickers:
                     for event in st.session_state.custom_events:
                         if event["ticker"] in used_tickers:
@@ -976,14 +983,10 @@ with tab3:
                                 line=dict(color="yellow", width=1, dash="dot"),
                                 annotation_text=event["description"],
                                 annotation_position="top left",
-                                annotation=dict(
-                                    font=dict(color="yellow", size=11),
-                                    bgcolor="rgba(0,0,0,0.6)",
-                                    borderpad=4
-                                )
+                                annotation=dict(font=dict(color="yellow", size=11), bgcolor="rgba(0,0,0,0.6)", borderpad=4)
                             )
 
-                # ------------------ Custom Splits (optional but nice) ------------------
+                # ── Splits personalizados (opcional) ──
                 if "custom_splits" in st.session_state and used_tickers:
                     for split in st.session_state.custom_splits:
                         if split["ticker"] in used_tickers:
@@ -997,49 +1000,47 @@ with tab3:
                                 annotation=dict(font=dict(color="white", size=11))
                             )
 
-                # ------------------ Main trace (price or percentage) ------------------
+                # ── Traza principal ──
                 if show_percentage or show_percentage_from_recent:
                     if show_percentage_from_recent:
                         custom_series_pct = (adjusted_series / adjusted_series.iloc[-1] - 1) * 100
-                        custom_series_pct = -custom_series_pct  # optional: invert to show drawdown from peak
+                        custom_series_pct = -custom_series_pct
                     else:
                         custom_series_pct = (adjusted_series / adjusted_series.iloc[0] - 1) * 100
 
-                    fig.add_trace(
-                        go.Scatter(
-                            x=custom_series_pct.index,
-                            y=custom_series_pct,
-                            mode='lines',
-                            name=f'Custom: {custom_expression[:15]}...' if len(custom_expression) > 15 else f'Custom: {custom_expression}',
-                            line=dict(color=colors[-1], width=2),
-                            hovertemplate='Fecha: %{x|%Y-%m-%d}<br>Variación: %{y:.2f}%<extra></extra>'
-                        )
-                    )
-                    # horizontal zero line
+                    fig.add_trace(go.Scatter(
+                        x=custom_series_pct.index,
+                        y=custom_series_pct,
+                        mode='lines',
+                        name=f'Custom: {custom_expression[:15]}...' if len(custom_expression) > 15 else custom_expression,
+                        line=dict(color=colors[-1], width=2),
+                        hovertemplate='Fecha: %{x|%Y-%m-%d}<br>Variación: %{y:.2f}%<extra></extra>'
+                    ))
                     fig.add_hline(y=0, line=dict(color="rgba(255,0,0,0.5)", dash="dash"))
-
                 else:
-                    fig.add_trace(
-                        go.Scatter(
-                            x=adjusted_series.index,
-                            y=adjusted_series,
-                            mode='lines',
-                            name=f'Custom: {custom_expression[:15]}...' if len(custom_expression) > 15 else f'Custom: {custom_expression}',
-                            line=dict(color=colors[-1], width=2),
-                            hovertemplate='Fecha: %{x|%Y-%m-%d}<br>Valor: %{y:.2f} ARS<extra></extra>'
-                        )
-                    )
+                    fig.add_trace(go.Scatter(
+                        x=adjusted_series.index,
+                        y=adjusted_series,
+                        mode='lines',
+                        name=f'Custom: {custom_expression[:15]}...' if len(custom_expression) > 15 else custom_expression,
+                        line=dict(color=colors[-1], width=2),
+                        hovertemplate='Fecha: %{x|%Y-%m-%d}<br>Valor: %{y:.2f} ARS<extra></extra>'
+                    ))
 
-                # ------------------ Layout & styling ------------------
+                # ── Título (personalizado o automático) ──
+                if custom_title.strip():
+                    plot_title = custom_title.strip()
+                else:
+                    if show_percentage or show_percentage_from_recent:
+                        plot_title = 'Ratio / Cálculo Personalizado (%)'
+                    else:
+                        plot_title = 'Ratio / Cálculo Personalizado Ajustado por Inflación'
+
                 fig.update_layout(
-                    title=dict(
-                        text='Ratio / Cálculo Personalizado Ajustado por Inflación' if not (show_percentage or show_percentage_from_recent)
-                             else 'Ratio / Cálculo Personalizado (%)',
-                        font=dict(size=20, color='white')
-                    ),
+                    title=dict(text=plot_title, font=dict(size=20, color='white')),
                     xaxis_title=dict(text='Fecha', font=dict(size=14, color='white')),
                     yaxis_title=dict(
-                        text='Valor Ajustado (ARS)' if not (show_percentage or show_percentage_from_recent) else 'Variación (%)',
+                        text='Variación (%)' if (show_percentage or show_percentage_from_recent) else 'Valor Ajustado (ARS)',
                         font=dict(size=14, color='white')
                     ),
                     **plot_style
@@ -1047,8 +1048,8 @@ with tab3:
 
                 fig.update_yaxes(
                     type='log' if (not (show_percentage or show_percentage_from_recent) and use_log_scale_arg) else 'linear',
-                    tickformat=',.2f' if not (show_percentage or show_percentage_from_recent) else ',.2f',
-                    ticksuffix='' if not (show_percentage or show_percentage_from_recent) else '%'
+                    tickformat=',.2f',
+                    ticksuffix='%' if (show_percentage or show_percentage_from_recent) else ''
                 )
 
                 # Watermark
@@ -1064,11 +1065,8 @@ with tab3:
                 st.plotly_chart(fig, use_container_width=True)
 
         except Exception as e:
-            available_vars = ', '.join([v for v in ticker_var_map.values()])
-            st.error(
-                f"Error al evaluar la expresión personalizada: {e}\n\n"
-                f"**Variables disponibles:** {available_vars}"
-            )
+            available_vars = ', '.join(ticker_var_map.values())
+            st.error(f"Error al evaluar la expresión: {e}\n\nVariables disponibles: {available_vars}")
 
 with tab4:
     st.subheader('Comparación de Volatilidad Histórica Ajustada por Inflación y Precio Ajustado por Inflación (Argentina)')
