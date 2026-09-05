@@ -408,53 +408,109 @@ def ajustar_precios_por_splits(df, ticker):
         logger.error(f"Error ajustando splits para {ticker}: {e}")
         return df
 
-@st.cache_data
+# ------------------------------------------------------------------
+# ARGENTINA - API Argentina Datos (INDEC)
+# ------------------------------------------------------------------
+@st.cache_data(ttl=86400)
 def load_cpi_data():
     try:
-        cpi = pd.read_csv('inflaciónargentina2.csv')
-        if 'Date' not in cpi.columns or 'CPI_MoM' not in cpi.columns:
-            st.error("El archivo CSV debe contener las columnas 'Date' y 'CPI_MoM'.")
-            st.stop()
+        url = "https://api.argentinadatos.com/v1/finanzas/indices/inflacion"
+        response = requests.get(url, timeout=15)
+        response.raise_for_status()
+        data = response.json()
 
+        cpi = pd.DataFrame(data)
+        # La API devuelve: {"fecha": "2001-01-01", "valor": 0.7}  (valor = % mensual)
+        cpi = cpi.rename(columns={"fecha": "Date", "valor": "CPI_MoM_pct"})
+        cpi["Date"] = pd.to_datetime(cpi["Date"])
+        cpi["CPI_MoM"] = cpi["CPI_MoM_pct"] / 100.0
+        cpi.set_index("Date", inplace=True)
+        cpi.sort_index(inplace=True)
+
+        cpi["Cumulative_Inflation"] = (1 + cpi["CPI_MoM"]).cumprod()
+        daily = cpi["Cumulative_Inflation"].resample("D").interpolate(method="linear")
+        daily.index = pd.to_datetime(daily.index)
+        if daily.index.tz is not None:
+            daily.index = daily.index.tz_localize(None)
+        return daily
+
+    except Exception as e:
+        st.warning(f"No se pudo obtener el IPC de la API ({e}). Usando CSV local como respaldo.")
+        return _load_cpi_data_csv_fallback()
+
+
+def _load_cpi_data_csv_fallback():
+    try:
+        cpi = pd.read_csv('inflaciónargentina2.csv')
         cpi['Date'] = pd.to_datetime(cpi['Date'], format='%d/%m/%Y')
         cpi.set_index('Date', inplace=True)
         cpi['Cumulative_Inflation'] = (1 + cpi['CPI_MoM']).cumprod()
         daily = cpi['Cumulative_Inflation'].resample('D').interpolate(method='linear')
-
         daily.index = pd.to_datetime(daily.index)
         if daily.index.tz is not None:
             daily.index = daily.index.tz_localize(None)
-
         return daily
-    except FileNotFoundError:
-        st.error("El archivo 'inflaciónargentina2.csv' no se encontró.")
-        st.stop()
     except Exception as e:
-        st.error(f"Error loading CPI data: {e}")
+        st.error(f"Error loading CPI fallback CSV: {e}")
         st.stop()
 
-@st.cache_data
+
+# ------------------------------------------------------------------
+# ESTADOS UNIDOS - FRED API (CPIAUCSL)
+# ------------------------------------------------------------------
+@st.cache_data(ttl=86400)
 def load_us_cpi_data():
+    try:
+        api_key = os.environ.get("FRED_API_KEY") or st.secrets.get("FRED_API_KEY", None)
+        if not api_key:
+            raise ValueError("Falta FRED_API_KEY (variable de entorno o st.secrets).")
+
+        url = "https://api.stlouisfed.org/fred/series/observations"
+        params = {
+            "series_id": "CPIAUCSL",
+            "api_key": api_key,
+            "file_type": "json",
+        }
+        response = requests.get(url, params=params, timeout=15)
+        response.raise_for_status()
+        data = response.json()["observations"]
+
+        cpi = pd.DataFrame(data)[["date", "value"]]
+        cpi = cpi.rename(columns={"date": "Date", "value": "CPI_Level"})
+        cpi["Date"] = pd.to_datetime(cpi["Date"])
+        cpi["CPI_Level"] = pd.to_numeric(cpi["CPI_Level"], errors="coerce")
+        cpi.dropna(subset=["CPI_Level"], inplace=True)
+        cpi.set_index("Date", inplace=True)
+        cpi.sort_index(inplace=True)
+
+        # CPIAUCSL es un índice de nivel (no % mensual) -> lo normalizamos
+        # para que sea comparable con la serie acumulada argentina.
+        cpi["Cumulative_Inflation"] = cpi["CPI_Level"] / cpi["CPI_Level"].iloc[0]
+        daily = cpi["Cumulative_Inflation"].resample("D").interpolate(method="linear")
+        daily.index = pd.to_datetime(daily.index)
+        if daily.index.tz is not None:
+            daily.index = daily.index.tz_localize(None)
+        return daily
+
+    except Exception as e:
+        st.warning(f"No se pudo obtener el CPI de EE.UU. desde FRED ({e}). Usando CSV de respaldo.")
+        return _load_us_cpi_data_csv_fallback()
+
+
+def _load_us_cpi_data_csv_fallback():
     try:
         url = "https://raw.githubusercontent.com/mau1878/Inflacion/refs/heads/main/inflaci%C3%B3nUSA.csv"
         cpi = pd.read_csv(url)
-        # Assuming similar format to Argentine CPI; adjust if columns differ (e.g., rename if needed)
-        if 'Date' not in cpi.columns or 'CPI_MoM' not in cpi.columns:
-            st.error("The US CPI CSV must contain columns 'Date' and 'CPI_MoM'. Please check the file.")
-            st.stop()
-
-        cpi['Date'] = pd.to_datetime(cpi['Date'], format='%d/%m/%Y')  # Adjust format if different
+        cpi['Date'] = pd.to_datetime(cpi['Date'], format='%d/%m/%Y')
         cpi.set_index('Date', inplace=True)
         cpi['Cumulative_Inflation'] = (1 + cpi['CPI_MoM']).cumprod()
         daily = cpi['Cumulative_Inflation'].resample('D').interpolate(method='linear')
-
         daily.index = pd.to_datetime(daily.index)
         if daily.index.tz is not None:
             daily.index = daily.index.tz_localize(None)
-
         return daily
     except Exception as e:
-        st.error(f"Error loading US CPI data from URL: {e}")
+        st.error(f"Error loading US CPI fallback CSV: {e}")
         st.stop()
 
 # Load CPI data
