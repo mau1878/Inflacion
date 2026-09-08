@@ -553,6 +553,28 @@ def _load_us_cpi_data_csv_fallback():
     except Exception as e:
         st.error(f"Error loading US CPI fallback CSV: {e}")
         st.stop()
+def mostrar_avisos_extrapolacion():
+    """
+    Llamar esto en el cuerpo principal del script, justo después de:
+        daily_cpi = load_cpi_data()
+        daily_us_cpi = load_us_cpi_data()
+    """
+    hoy = pd.Timestamp(datetime.now().date())
+    fecha_arg = st.session_state.get('ipc_arg_ultima_fecha_real')
+    fecha_usa = st.session_state.get('ipc_usa_ultima_fecha_real')
+
+    if fecha_arg is not None and fecha_arg < hoy.to_period('M').to_timestamp():
+        st.caption(
+            f"⚠️ IPC Argentina: último dato oficial publicado es de "
+            f"{fecha_arg.strftime('%B %Y')}. Los días posteriores usan una "
+            f"estimación basada en el promedio de los últimos 3 meses."
+        )
+    if fecha_usa is not None and fecha_usa < hoy.to_period('M').to_timestamp():
+        st.caption(
+            f"⚠️ CPI EE.UU.: último dato oficial publicado es de "
+            f"{fecha_usa.strftime('%B %Y')}. Los días posteriores usan una "
+            f"estimación basada en el promedio de los últimos 3 meses."
+        )
 
 # Load CPI data
 daily_cpi = load_cpi_data()
@@ -679,28 +701,6 @@ if st.session_state.custom_events:
         if st.sidebar.button(f"Eliminar Evento {i+1}", key=f"remove_event_{i}"):
             st.session_state.custom_events.pop(i)
             st.sidebar.success("Evento eliminado.")
-def mostrar_avisos_extrapolacion():
-    """
-    Llamar esto en el cuerpo principal del script, justo después de:
-        daily_cpi = load_cpi_data()
-        daily_us_cpi = load_us_cpi_data()
-    """
-    hoy = pd.Timestamp(datetime.now().date())
-    fecha_arg = st.session_state.get('ipc_arg_ultima_fecha_real')
-    fecha_usa = st.session_state.get('ipc_usa_ultima_fecha_real')
-
-    if fecha_arg is not None and fecha_arg < hoy.to_period('M').to_timestamp():
-        st.caption(
-            f"⚠️ IPC Argentina: último dato oficial publicado es de "
-            f"{fecha_arg.strftime('%B %Y')}. Los días posteriores usan una "
-            f"estimación basada en el promedio de los últimos 3 meses."
-        )
-    if fecha_usa is not None and fecha_usa < hoy.to_period('M').to_timestamp():
-        st.caption(
-            f"⚠️ CPI EE.UU.: último dato oficial publicado es de "
-            f"{fecha_usa.strftime('%B %Y')}. Los días posteriores usan una "
-            f"estimación basada en el promedio de los últimos 3 meses."
-        )
 # Main content in tabs
 tab1, tab2, tab3, tab4, tab5 = st.tabs(["Inflation Calculator", "Argentine Stock Adjuster", "Custom Calculations", "Volatility Analysis", "US Stock Adjuster"])
 
