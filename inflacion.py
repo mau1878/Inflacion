@@ -11,6 +11,7 @@ import time
 import os
 from curl_cffi import requests as cffi_requests
 from retrying import retry
+import numpy as np
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -93,6 +94,7 @@ splits = {
     'WMT.BA': 3,
     'AGRO.BA': (6, 2.1)
 }
+
 
 # ------------------------------
 # Data source functions
@@ -408,6 +410,55 @@ def ajustar_precios_por_splits(df, ticker):
         logger.error(f"Error ajustando splits para {ticker}: {e}")
         return df
 
+def _extrapolar_hasta_hoy(cpi_mensual: pd.DataFrame, meses_promedio: int = 3) -> tuple[pd.DataFrame, pd.Timestamp]:
+    """
+    Recibe un DataFrame mensual con columna 'CPI_MoM' (tasa mensual, ej. 0.04 = 4%)
+    indexado por fecha. Devuelve:
+      - el mismo DataFrame con filas mensuales sintéticas agregadas hasta el mes actual,
+        usando el promedio de la tasa de los últimos `meses_promedio` meses reales.
+      - la fecha del último dato REAL (para mostrar el aviso).
+    """
+    cpi_mensual = cpi_mensual.sort_index()
+    ultima_fecha_real = cpi_mensual.index.max()
+    tasa_promedio = cpi_mensual['CPI_MoM'].tail(meses_promedio).mean()
+
+    hoy = pd.Timestamp(datetime.now().date())
+    if ultima_fecha_real >= hoy.to_period('M').to_timestamp():
+        # Ya hay dato del mes actual, no hace falta extrapolar
+        return cpi_mensual, ultima_fecha_real
+
+    # Generar fechas mensuales sintéticas desde el mes siguiente al último real, hasta el mes actual
+    fechas_sinteticas = pd.date_range(
+        start=ultima_fecha_real + pd.offsets.MonthBegin(1),
+        end=hoy,
+        freq='MS'
+    )
+    if len(fechas_sinteticas) == 0:
+        return cpi_mensual, ultima_fecha_real
+
+    filas_sinteticas = pd.DataFrame(
+        {'CPI_MoM': [tasa_promedio] * len(fechas_sinteticas)},
+        index=fechas_sinteticas
+    )
+    cpi_extendido = pd.concat([cpi_mensual[['CPI_MoM']], filas_sinteticas])
+    cpi_extendido = cpi_extendido[~cpi_extendido.index.duplicated(keep='first')]
+    return cpi_extendido, ultima_fecha_real
+
+
+def _construir_serie_diaria(cpi_mensual_extendido: pd.DataFrame) -> pd.Series:
+    cpi = cpi_mensual_extendido.sort_index().copy()
+    cpi['Cumulative_Inflation'] = (1 + cpi['CPI_MoM']).cumprod()
+    hoy = pd.Timestamp(datetime.now().date())
+    # Aseguramos que la interpolación diaria llegue hasta hoy
+    if cpi.index.max() < hoy:
+        cpi.loc[hoy] = np.nan
+        cpi = cpi.sort_index()
+    daily = cpi['Cumulative_Inflation'].resample('D').interpolate(method='linear')
+    daily = daily.ffill()  # por si el último tramo quedó NaN
+    daily.index = pd.to_datetime(daily.index)
+    if daily.index.tz is not None:
+        daily.index = daily.index.tz_localize(None)
+    return daily
 # ------------------------------------------------------------------
 # ARGENTINA - API Argentina Datos (INDEC)
 # ------------------------------------------------------------------
@@ -420,18 +471,15 @@ def load_cpi_data():
         data = response.json()
 
         cpi = pd.DataFrame(data)
-        # La API devuelve: {"fecha": "2001-01-01", "valor": 0.7}  (valor = % mensual)
         cpi = cpi.rename(columns={"fecha": "Date", "valor": "CPI_MoM_pct"})
         cpi["Date"] = pd.to_datetime(cpi["Date"])
         cpi["CPI_MoM"] = cpi["CPI_MoM_pct"] / 100.0
         cpi.set_index("Date", inplace=True)
-        cpi.sort_index(inplace=True)
 
-        cpi["Cumulative_Inflation"] = (1 + cpi["CPI_MoM"]).cumprod()
-        daily = cpi["Cumulative_Inflation"].resample("D").interpolate(method="linear")
-        daily.index = pd.to_datetime(daily.index)
-        if daily.index.tz is not None:
-            daily.index = daily.index.tz_localize(None)
+        cpi_extendido, ultima_fecha_real = _extrapolar_hasta_hoy(cpi)
+        daily = _construir_serie_diaria(cpi_extendido)
+
+        st.session_state['ipc_arg_ultima_fecha_real'] = ultima_fecha_real
         return daily
 
     except Exception as e:
@@ -444,11 +492,9 @@ def _load_cpi_data_csv_fallback():
         cpi = pd.read_csv('inflaciónargentina2.csv')
         cpi['Date'] = pd.to_datetime(cpi['Date'], format='%d/%m/%Y')
         cpi.set_index('Date', inplace=True)
-        cpi['Cumulative_Inflation'] = (1 + cpi['CPI_MoM']).cumprod()
-        daily = cpi['Cumulative_Inflation'].resample('D').interpolate(method='linear')
-        daily.index = pd.to_datetime(daily.index)
-        if daily.index.tz is not None:
-            daily.index = daily.index.tz_localize(None)
+        cpi_extendido, ultima_fecha_real = _extrapolar_hasta_hoy(cpi)
+        daily = _construir_serie_diaria(cpi_extendido)
+        st.session_state['ipc_arg_ultima_fecha_real'] = ultima_fecha_real
         return daily
     except Exception as e:
         st.error(f"Error loading CPI fallback CSV: {e}")
@@ -466,11 +512,7 @@ def load_us_cpi_data():
             raise ValueError("Falta FRED_API_KEY (variable de entorno o st.secrets).")
 
         url = "https://api.stlouisfed.org/fred/series/observations"
-        params = {
-            "series_id": "CPIAUCSL",
-            "api_key": api_key,
-            "file_type": "json",
-        }
+        params = {"series_id": "CPIAUCSL", "api_key": api_key, "file_type": "json"}
         response = requests.get(url, params=params, timeout=15)
         response.raise_for_status()
         data = response.json()["observations"]
@@ -483,13 +525,14 @@ def load_us_cpi_data():
         cpi.set_index("Date", inplace=True)
         cpi.sort_index(inplace=True)
 
-        # CPIAUCSL es un índice de nivel (no % mensual) -> lo normalizamos
-        # para que sea comparable con la serie acumulada argentina.
-        cpi["Cumulative_Inflation"] = cpi["CPI_Level"] / cpi["CPI_Level"].iloc[0]
-        daily = cpi["Cumulative_Inflation"].resample("D").interpolate(method="linear")
-        daily.index = pd.to_datetime(daily.index)
-        if daily.index.tz is not None:
-            daily.index = daily.index.tz_localize(None)
+        # Convertimos nivel de índice a tasa mensual para poder extrapolar igual que Argentina
+        cpi["CPI_MoM"] = cpi["CPI_Level"].pct_change()
+        cpi.dropna(subset=["CPI_MoM"], inplace=True)
+
+        cpi_extendido, ultima_fecha_real = _extrapolar_hasta_hoy(cpi)
+        daily = _construir_serie_diaria(cpi_extendido)
+
+        st.session_state['ipc_usa_ultima_fecha_real'] = ultima_fecha_real
         return daily
 
     except Exception as e:
@@ -503,11 +546,9 @@ def _load_us_cpi_data_csv_fallback():
         cpi = pd.read_csv(url)
         cpi['Date'] = pd.to_datetime(cpi['Date'], format='%d/%m/%Y')
         cpi.set_index('Date', inplace=True)
-        cpi['Cumulative_Inflation'] = (1 + cpi['CPI_MoM']).cumprod()
-        daily = cpi['Cumulative_Inflation'].resample('D').interpolate(method='linear')
-        daily.index = pd.to_datetime(daily.index)
-        if daily.index.tz is not None:
-            daily.index = daily.index.tz_localize(None)
+        cpi_extendido, ultima_fecha_real = _extrapolar_hasta_hoy(cpi)
+        daily = _construir_serie_diaria(cpi_extendido)
+        st.session_state['ipc_usa_ultima_fecha_real'] = ultima_fecha_real
         return daily
     except Exception as e:
         st.error(f"Error loading US CPI fallback CSV: {e}")
@@ -516,6 +557,7 @@ def _load_us_cpi_data_csv_fallback():
 # Load CPI data
 daily_cpi = load_cpi_data()
 daily_us_cpi = load_us_cpi_data()
+mostrar_avisos_extrapolacion()
 
 # ------------------------------
 # Streamlit UI
@@ -637,7 +679,28 @@ if st.session_state.custom_events:
         if st.sidebar.button(f"Eliminar Evento {i+1}", key=f"remove_event_{i}"):
             st.session_state.custom_events.pop(i)
             st.sidebar.success("Evento eliminado.")
+def mostrar_avisos_extrapolacion():
+    """
+    Llamar esto en el cuerpo principal del script, justo después de:
+        daily_cpi = load_cpi_data()
+        daily_us_cpi = load_us_cpi_data()
+    """
+    hoy = pd.Timestamp(datetime.now().date())
+    fecha_arg = st.session_state.get('ipc_arg_ultima_fecha_real')
+    fecha_usa = st.session_state.get('ipc_usa_ultima_fecha_real')
 
+    if fecha_arg is not None and fecha_arg < hoy.to_period('M').to_timestamp():
+        st.caption(
+            f"⚠️ IPC Argentina: último dato oficial publicado es de "
+            f"{fecha_arg.strftime('%B %Y')}. Los días posteriores usan una "
+            f"estimación basada en el promedio de los últimos 3 meses."
+        )
+    if fecha_usa is not None and fecha_usa < hoy.to_period('M').to_timestamp():
+        st.caption(
+            f"⚠️ CPI EE.UU.: último dato oficial publicado es de "
+            f"{fecha_usa.strftime('%B %Y')}. Los días posteriores usan una "
+            f"estimación basada en el promedio de los últimos 3 meses."
+        )
 # Main content in tabs
 tab1, tab2, tab3, tab4, tab5 = st.tabs(["Inflation Calculator", "Argentine Stock Adjuster", "Custom Calculations", "Volatility Analysis", "US Stock Adjuster"])
 
