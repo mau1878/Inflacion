@@ -126,6 +126,7 @@ def graficar_activos_ajustados(
     show_nominal_ghost,
     siempre_ajustar=False,
     force_inflation=False,
+    plot_end_date=None,
 ):
     """
     Descarga, ajusta por inflación y grafica (Plotly + Matplotlib/Seaborn) una lista de tickers.
@@ -134,6 +135,8 @@ def graficar_activos_ajustados(
     force_inflation solo aplica cuando siempre_ajustar=False (pestaña Argentina).
     show_nominal_ghost agrega, por ticker, una línea punteada "fantasma" con el valor nominal
     (sin ajustar por inflación), tanto en modo absoluto como en modo porcentual.
+    plot_end_date permite fijar la fecha final del rango (por defecto, la fecha actual /
+    el último dato de IPC disponible, igual que antes).
     Devuelve (stock_data_dict_nominal, stock_data_dict_adjusted, ticker_var_map).
     """
     tickers = [ticker.strip().upper() for ticker in tickers_input.split(',')]
@@ -144,7 +147,10 @@ def graficar_activos_ajustados(
     stock_data_dict_nominal = {}
     stock_data_dict_adjusted = {}
 
-    end_date = daily_cpi_serie.index.max().date() + timedelta(days=1)
+    if plot_end_date is None:
+        end_date = daily_cpi_serie.index.max().date() + timedelta(days=1)
+    else:
+        end_date = plot_end_date + timedelta(days=1)
 
     for i, ticker in enumerate(tickers):
         try:
@@ -218,7 +224,7 @@ def graficar_activos_ajustados(
                 fig.add_trace(
                     go.Scatter(
                         x=stock_data.index, y=pct_change, mode='lines',
-                        name=f'{display_name} (%)',
+                        name=f'{display_name} (Ajustado, %)',
                         line=dict(color=color, width=1.5), yaxis='y1',
                         hovertemplate='Fecha: %{x|%Y-%m-%d}<br>Variación: %{y:.2f}%<extra></extra>'
                     )
@@ -228,7 +234,7 @@ def graficar_activos_ajustados(
                     y0=0, y1=0, line=dict(color="rgba(255, 0, 0, 0.5)", width=1, dash="dash"),
                     xref="x", yref="y1"
                 )
-                ax_mpl.plot(stock_data.index, pct_change, color=color, linewidth=1.5, label=f'{display_name} (%)')
+                ax_mpl.plot(stock_data.index, pct_change, color=color, linewidth=1.5, label=f'{display_name} (Ajustado, %)')
                 ax_mpl.axhline(0, color='red', linewidth=1, linestyle='--', alpha=0.5)
 
                 if show_nominal_ghost:
@@ -254,7 +260,7 @@ def graficar_activos_ajustados(
                 fig.add_trace(
                     go.Scatter(
                         x=stock_data.index, y=stock_data['Inflation_Adjusted_Close'], mode='lines',
-                        name=display_name, line=dict(color=color, width=1.5), yaxis='y1',
+                        name=f'{display_name} (Ajustado por Inflación)', line=dict(color=color, width=1.5), yaxis='y1',
                         hovertemplate=f'Fecha: %{{x|%Y-%m-%d}}<br>Precio: %{{y:.2f}} {moneda}<extra></extra>'
                     )
                 )
@@ -262,13 +268,13 @@ def graficar_activos_ajustados(
                 fig.add_trace(
                     go.Scatter(
                         x=stock_data.index, y=[avg_price] * len(stock_data), mode='lines',
-                        name=f'{display_name} Avg', line=dict(color=color, width=0.8, dash='dot'), yaxis='y1',
+                        name=f'{display_name} Promedio (Ajustado)', line=dict(color=color, width=0.8, dash='dot'), yaxis='y1',
                         hovertemplate=f'Fecha: %{{x|%Y-%m-%d}}<br>Promedio: %{{y:.2f}} {moneda}<extra></extra>'
                     )
                 )
                 ax_mpl.plot(
                     stock_data.index, stock_data['Inflation_Adjusted_Close'],
-                    color=color, linewidth=1.5, label=display_name
+                    color=color, linewidth=1.5, label=f'{display_name} (Ajustado por Inflación)'
                 )
                 ax_mpl.axhline(avg_price, color=color, linewidth=0.8, linestyle=':', alpha=0.8)
 
@@ -290,7 +296,7 @@ def graficar_activos_ajustados(
                 stock_data['SMA'] = stock_data['Inflation_Adjusted_Close'].rolling(window=sma_period).mean()
                 fig.add_trace(
                     go.Scatter(
-                        x=stock_data.index, y=stock_data['SMA'], mode='lines', name=f'{display_name} SMA',
+                        x=stock_data.index, y=stock_data['SMA'], mode='lines', name=f'{display_name} SMA (Ajustado)',
                         line=dict(color='orange', width=1), yaxis='y1',
                         hovertemplate=f'Fecha: %{{x|%Y-%m-%d}}<br>SMA: %{{y:.2f}} {moneda}<extra></extra>'
                     )
@@ -354,36 +360,40 @@ def graficar_activos_ajustados(
 # ------------------------------
 # Diccionario de tickers y sus divisores
 splits = {
-    'ADGO.BA': 1,
-    'ADBE.BA': 2,
-    'AEM.BA': 2,
-    'AMGN.BA': 3,
-    'AAPL.BA': 2,
-    'BAC.BA': 2,
-    'GOLD.BA': 2,
-    'BIOX.BA': 2,
-    'CVX.BA': 2,
-    'LLY.BA': 7,
-    'XOM.BA': 2,
-    'FSLR.BA': 6,
-    'IBM.BA': 3,
-    'JD.BA': 2,
-    'JPM.BA': 3,
-    'MELI.BA': 2,
-    'NFLX.BA': 3,
-    'PEP.BA': 3,
-    'PFE.BA': 2,
-    'PG.BA': 3,
-    'RIO.BA': 2,
-    'SONY.BA': 2,
-    'SBUX.BA': 3,
-    'TXR.BA': 2,
-    'BA.BA': 4,
-    'TM.BA': 3,
-    'VZ.BA': 2,
-    'VIST.BA': 3,
-    'WMT.BA': 3,
-    'AGRO.BA': (6, 2.1)
+    'ADGO.BA': {'ratio': 1, 'date': datetime(2024, 1, 23)},
+    'ADBE.BA': {'ratio': 2, 'date': datetime(2024, 1, 23)},
+    'AEM.BA': {'ratio': 2, 'date': datetime(2024, 1, 23)},
+    'AMGN.BA': {'ratio': 3, 'date': datetime(2024, 1, 23)},
+    'AAPL.BA': {'ratio': 2, 'date': datetime(2024, 1, 23)},
+    'BAC.BA': {'ratio': 2, 'date': datetime(2024, 1, 23)},
+    'GOLD.BA': {'ratio': 2, 'date': datetime(2024, 1, 23)},
+    'BIOX.BA': {'ratio': 2, 'date': datetime(2024, 1, 23)},
+    'CVX.BA': {'ratio': 2, 'date': datetime(2024, 1, 23)},
+    'LLY.BA': {'ratio': 7, 'date': datetime(2024, 1, 23)},
+    'XOM.BA': {'ratio': 2, 'date': datetime(2024, 1, 23)},
+    'FSLR.BA': {'ratio': 6, 'date': datetime(2024, 1, 23)},
+    'IBM.BA': {'ratio': 3, 'date': datetime(2024, 1, 23)},
+    'JD.BA': {'ratio': 2, 'date': datetime(2024, 1, 23)},
+    'JPM.BA': {'ratio': 3, 'date': datetime(2024, 1, 23)},
+    'MELI.BA': {'ratio': 2, 'date': datetime(2024, 1, 23)},
+    'NFLX.BA': {'ratio': 3, 'date': datetime(2024, 1, 23)},
+    'PEP.BA': {'ratio': 3, 'date': datetime(2024, 1, 23)},
+    'PFE.BA': {'ratio': 2, 'date': datetime(2024, 1, 23)},
+    'PG.BA': {'ratio': 3, 'date': datetime(2024, 1, 23)},
+    'RIO.BA': {'ratio': 2, 'date': datetime(2024, 1, 23)},
+    'SONY.BA': {'ratio': 2, 'date': datetime(2024, 1, 23)},
+    'SBUX.BA': {'ratio': 3, 'date': datetime(2024, 1, 23)},
+    'TXR.BA': {'ratio': 2, 'date': datetime(2024, 1, 23)},
+    'BA.BA': {'ratio': 4, 'date': datetime(2024, 1, 23)},
+    'TM.BA': {'ratio': 3, 'date': datetime(2024, 1, 23)},
+    'VZ.BA': {'ratio': 2, 'date': datetime(2024, 1, 23)},
+    'VIST.BA': {'ratio': 3, 'date': datetime(2024, 1, 23)},
+    'WMT.BA': {'ratio': 3, 'date': datetime(2024, 1, 23)},
+    'AGRO.BA': [
+        {'ratio': 6, 'date': datetime(2023, 11, 3), 'type': 'divide'},
+        {'ratio': 2.1, 'date': datetime(2023, 11, 3), 'type': 'multiply'},
+    ],
+    'ECOG.BA': {'ratio': 10, 'date': datetime(2025, 8, 18)},
 }
 
 
@@ -656,22 +666,18 @@ def ajustar_precios_por_splits(df, ticker):
 
         if ticker in splits:
             adjustment = splits[ticker]
-            if isinstance(adjustment, tuple):
-                all_splits.append({
-                    "date": datetime(2023, 11, 3),
-                    "ratio": adjustment[0],
-                    "type": "divide"
-                })
-                all_splits.append({
-                    "date": datetime(2023, 11, 3),
-                    "ratio": adjustment[1],
-                    "type": "multiply"
-                })
+            if isinstance(adjustment, list):
+                for paso in adjustment:
+                    all_splits.append({
+                        "date": paso["date"],
+                        "ratio": paso["ratio"],
+                        "type": paso.get("type", "divide")
+                    })
             else:
                 all_splits.append({
-                    "date": datetime(2024, 1, 23),
-                    "ratio": adjustment,
-                    "type": "divide"
+                    "date": adjustment["date"],
+                    "ratio": adjustment["ratio"],
+                    "type": adjustment.get("type", "divide")
                 })
 
         if "custom_splits" in st.session_state:
@@ -893,6 +899,23 @@ st.sidebar.markdown("""
 *Nota: Algunos tickers pueden no estar disponibles en todas las fuentes.*
 """)
 
+st.sidebar.subheader("Paleta de colores de los gráficos")
+paletas_disponibles = {
+    'Clásico': ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b'],
+    'Deep (Seaborn)': sns.color_palette('deep', 10).as_hex(),
+    'Muted (Seaborn)': sns.color_palette('muted', 10).as_hex(),
+    'Bright (Seaborn)': sns.color_palette('bright', 10).as_hex(),
+    'Pastel (Seaborn)': sns.color_palette('pastel', 10).as_hex(),
+    'Colorblind (Seaborn)': sns.color_palette('colorblind', 10).as_hex(),
+    'Dark (Seaborn)': sns.color_palette('dark', 10).as_hex(),
+}
+paleta_seleccionada = st.sidebar.selectbox(
+    "Elegí la paleta de colores para las líneas de los gráficos:",
+    list(paletas_disponibles.keys()),
+    key='paleta_colores_select'
+)
+colors = paletas_disponibles[paleta_seleccionada]
+
 st.sidebar.subheader("Cargar datos personalizados desde CSV")
 if "uploaded_data" not in st.session_state:
     st.session_state.uploaded_data = {}
@@ -1089,6 +1112,14 @@ with tab2:
         key='plot_start_date_input_arg'
     )
 
+    plot_end_date = st.date_input(
+        'Selecciona la fecha de fin para los datos mostrados en el gráfico:',
+        min_value=plot_start_date,
+        max_value=daily_cpi.index.max().date(),
+        value=daily_cpi.index.max().date(),
+        key='plot_end_date_input_arg'
+    )
+
     force_inflation_arg = st.checkbox('Aplicar ajuste por inflación a todos los tickers (incluyendo no-.BA)', value=False, key='force_inflation_arg')
 
     show_percentage = st.checkbox('Mostrar valores ajustados por inflación como porcentajes', value=False, key='show_percentage_arg')
@@ -1128,6 +1159,7 @@ with tab2:
             show_nominal_ghost=show_nominal_ghost_arg,
             siempre_ajustar=False,
             force_inflation=force_inflation_arg,
+            plot_end_date=plot_end_date,
         )
 
 with tab3:
@@ -1472,6 +1504,14 @@ with tab5:
         key='plot_start_date_input_us'
     )
 
+    plot_end_date_us = st.date_input(
+        'Selecciona la fecha de fin para los datos mostrados en el gráfico:',
+        min_value=plot_start_date_us,
+        max_value=daily_us_cpi.index.max().date(),
+        value=daily_us_cpi.index.max().date(),
+        key='plot_end_date_input_us'
+    )
+
     show_percentage_us = st.checkbox('Mostrar valores ajustados por inflación como porcentajes', value=False, key='show_percentage_us')
     show_percentage_from_recent_us = st.checkbox(
         'Mostrar valores ajustados por inflación como porcentajes desde el valor más reciente',
@@ -1508,4 +1548,5 @@ with tab5:
             use_log_scale=use_log_scale_us,
             show_nominal_ghost=show_nominal_ghost_us,
             siempre_ajustar=True,
+            plot_end_date=plot_end_date_us,
         )
