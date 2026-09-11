@@ -288,7 +288,6 @@ def graficar_activos_ajustados(
                         hovertemplate=f'Fecha: %{{x|%Y-%m-%d}}<br>SMA: %{{y:.2f}} {moneda}<extra></extra>'
                     )
                 )
-                ax_mpl.plot(stock_data.index, stock_data['SMA'], color='orange', linewidth=1, label=f'{display_name} SMA')
 
             for split in st.session_state.custom_splits:
                 if split["ticker"] == ticker:
