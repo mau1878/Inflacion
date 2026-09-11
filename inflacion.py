@@ -12,6 +12,10 @@ import os
 from curl_cffi import requests as cffi_requests
 from retrying import retry
 import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import matplotlib.ticker as mticker
+import seaborn as sns
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -59,6 +63,286 @@ plot_style = {
 
 # Color palette for multiple tickers
 colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
+
+# Estilo oscuro para los gráficos Matplotlib/Seaborn (más prácticos para manejar desde el celular)
+sns.set_theme(style="darkgrid")
+plt.rcParams.update({
+    'figure.facecolor': '#1e1e1e',
+    'axes.facecolor': '#1e1e1e',
+    'axes.edgecolor': 'white',
+    'axes.labelcolor': 'white',
+    'text.color': 'white',
+    'xtick.color': 'white',
+    'ytick.color': 'white',
+    'grid.color': 'white',
+    'grid.alpha': 0.2,
+    'legend.facecolor': '#1e1e1e',
+    'legend.edgecolor': 'white',
+    'legend.labelcolor': 'white',
+    'font.size': 10,
+})
+
+
+def _finalizar_grafico_mpl(fig, ax, titulo, ylabel_txt, is_percentage, use_log_scale):
+    """Aplica estilo consistente (oscuro, marca de agua, formato de fechas) a un gráfico Matplotlib/Seaborn."""
+    ax.set_title(titulo, fontsize=15, color='white', pad=12)
+    ax.set_xlabel('Fecha', fontsize=11)
+    ax.set_ylabel(ylabel_txt, fontsize=11)
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
+    fig.autofmt_xdate(rotation=45)
+    if is_percentage:
+        ax.yaxis.set_major_formatter(mticker.PercentFormatter())
+    else:
+        ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f'{x:,.2f}'))
+        if use_log_scale:
+            ax.set_yscale('log')
+    ax.text(
+        0.5, 0.5, "MTaurus - X: mtaurus_ok", transform=ax.transAxes,
+        fontsize=24, color='white', alpha=0.12, ha='center', va='center'
+    )
+    handles, labels = ax.get_legend_handles_labels()
+    if handles:
+        ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.2), ncol=3, fontsize=8)
+    fig.tight_layout()
+
+
+def graficar_activos_ajustados(
+    tickers_input,
+    sma_period,
+    plot_start_date,
+    daily_cpi_serie,
+    data_source,
+    moneda,
+    is_percentage_mode,
+    show_percentage_from_recent,
+    use_log_scale,
+    show_nominal_ghost,
+    siempre_ajustar=False,
+    force_inflation=False,
+):
+    """
+    Descarga, ajusta por inflación y grafica (Plotly + Matplotlib/Seaborn) una lista de tickers.
+    moneda: 'ARS' o 'USD', usado solo para etiquetas/hovers.
+    siempre_ajustar=True implica que se ajusta siempre por inflación (pestaña EEUU).
+    force_inflation solo aplica cuando siempre_ajustar=False (pestaña Argentina).
+    show_nominal_ghost agrega, por ticker, una línea punteada "fantasma" con el valor nominal
+    (sin ajustar por inflación), tanto en modo absoluto como en modo porcentual.
+    Devuelve (stock_data_dict_nominal, stock_data_dict_adjusted, ticker_var_map).
+    """
+    tickers = [ticker.strip().upper() for ticker in tickers_input.split(',')]
+    fig = go.Figure()
+    fig_mpl, ax_mpl = plt.subplots(figsize=(11, 5.5))
+
+    ticker_var_map = {ticker: ticker.replace('.', '_') for ticker in tickers}
+    stock_data_dict_nominal = {}
+    stock_data_dict_adjusted = {}
+
+    end_date = daily_cpi_serie.index.max().date() + timedelta(days=1)
+
+    for i, ticker in enumerate(tickers):
+        try:
+            stock_data = descargar_datos(ticker, plot_start_date, end_date, data_source)
+
+            if stock_data.empty:
+                st.error(f"No se encontraron datos para el ticker {ticker}.")
+                continue
+
+            if 'Date' in stock_data.columns:
+                stock_data.set_index('Date', inplace=True)
+            stock_data.index = pd.to_datetime(stock_data.index)
+            if stock_data.index.tz is not None:
+                stock_data.index = stock_data.index.tz_localize(None)
+
+            if data_source in ['IOL (Invertir Online)', 'ByMA Data']:
+                if len(stock_data.columns) == 1:
+                    stock_data = stock_data.rename(columns={stock_data.columns[0]: 'Close'})
+
+            stock_data.index = stock_data.index.tz_localize(None)
+            stock_data.index = stock_data.index.normalize()
+
+            stock_data = ajustar_precios_por_splits(stock_data, ticker)
+
+            if siempre_ajustar:
+                needs_inflation_adjustment = True
+            else:
+                needs_inflation_adjustment = force_inflation or (
+                    (data_source == 'YFinance' and (ticker.endswith('.BA') or ticker == '^MERV')) or
+                    (data_source != 'YFinance')
+                )
+
+            if needs_inflation_adjustment and not stock_data.empty:
+                daily_cpi_clean = daily_cpi_serie.copy()
+                daily_cpi_clean.index = pd.to_datetime(daily_cpi_clean.index).normalize()
+                stock_data = pd.merge(
+                    stock_data, daily_cpi_clean,
+                    left_index=True, right_index=True, how='left'
+                )
+                stock_data['Cumulative_Inflation'] = stock_data['Cumulative_Inflation'].ffill().bfill()
+                if not stock_data.empty:
+                    last_cpi = stock_data['Cumulative_Inflation'].iloc[-1]
+                    stock_data['Inflation_Adjusted_Close'] = stock_data['Close'] * (
+                        last_cpi / stock_data['Cumulative_Inflation']
+                    )
+                else:
+                    stock_data['Inflation_Adjusted_Close'] = stock_data['Close']
+            else:
+                stock_data['Inflation_Adjusted_Close'] = stock_data['Close']
+
+            if stock_data.empty:
+                st.error(f"No hay datos suficientes para procesar {ticker}.")
+                continue
+
+            var_name = ticker_var_map[ticker]
+            stock_data_dict_nominal[var_name] = stock_data['Close']
+            stock_data_dict_adjusted[var_name] = stock_data['Inflation_Adjusted_Close']
+
+            display_name = f'{ticker[:10]}...' if len(ticker) > 10 else ticker
+            color = colors[i % len(colors)]
+
+            if is_percentage_mode:
+                if show_percentage_from_recent and len(stock_data) > 0:
+                    pct_change = ((stock_data['Inflation_Adjusted_Close'].iloc[-1] /
+                                   stock_data['Inflation_Adjusted_Close']) - 1) * 100
+                    pct_change = pct_change.clip(lower=-100)
+                else:
+                    pct_change = (stock_data['Inflation_Adjusted_Close'] /
+                                  stock_data['Inflation_Adjusted_Close'].iloc[0] - 1) * 100
+
+                fig.add_trace(
+                    go.Scatter(
+                        x=stock_data.index, y=pct_change, mode='lines',
+                        name=f'{display_name} (%)',
+                        line=dict(color=color, width=1.5), yaxis='y1',
+                        hovertemplate='Fecha: %{x|%Y-%m-%d}<br>Variación: %{y:.2f}%<extra></extra>'
+                    )
+                )
+                fig.add_shape(
+                    type="line", x0=stock_data.index.min(), x1=stock_data.index.max(),
+                    y0=0, y1=0, line=dict(color="rgba(255, 0, 0, 0.5)", width=1, dash="dash"),
+                    xref="x", yref="y1"
+                )
+                ax_mpl.plot(stock_data.index, pct_change, color=color, linewidth=1.5, label=f'{display_name} (%)')
+                ax_mpl.axhline(0, color='red', linewidth=1, linestyle='--', alpha=0.5)
+
+                if show_nominal_ghost:
+                    if show_percentage_from_recent and len(stock_data) > 0:
+                        pct_change_nom = ((stock_data['Close'].iloc[-1] / stock_data['Close']) - 1) * 100
+                        pct_change_nom = pct_change_nom.clip(lower=-100)
+                    else:
+                        pct_change_nom = (stock_data['Close'] / stock_data['Close'].iloc[0] - 1) * 100
+
+                    fig.add_trace(
+                        go.Scatter(
+                            x=stock_data.index, y=pct_change_nom, mode='lines',
+                            name=f'{display_name} Nominal (%)',
+                            line=dict(color=color, width=1, dash='dot'), yaxis='y1', opacity=0.55,
+                            hovertemplate='Fecha: %{x|%Y-%m-%d}<br>Variación nominal: %{y:.2f}%<extra></extra>'
+                        )
+                    )
+                    ax_mpl.plot(
+                        stock_data.index, pct_change_nom, color=color, linewidth=1,
+                        linestyle=':', alpha=0.55, label=f'{display_name} Nominal (%)'
+                    )
+            else:
+                fig.add_trace(
+                    go.Scatter(
+                        x=stock_data.index, y=stock_data['Inflation_Adjusted_Close'], mode='lines',
+                        name=display_name, line=dict(color=color, width=1.5), yaxis='y1',
+                        hovertemplate=f'Fecha: %{{x|%Y-%m-%d}}<br>Precio: %{{y:.2f}} {moneda}<extra></extra>'
+                    )
+                )
+                avg_price = stock_data['Inflation_Adjusted_Close'].mean()
+                fig.add_trace(
+                    go.Scatter(
+                        x=stock_data.index, y=[avg_price] * len(stock_data), mode='lines',
+                        name=f'{display_name} Avg', line=dict(color=color, width=0.8, dash='dot'), yaxis='y1',
+                        hovertemplate=f'Fecha: %{{x|%Y-%m-%d}}<br>Promedio: %{{y:.2f}} {moneda}<extra></extra>'
+                    )
+                )
+                ax_mpl.plot(
+                    stock_data.index, stock_data['Inflation_Adjusted_Close'],
+                    color=color, linewidth=1.5, label=display_name
+                )
+                ax_mpl.axhline(avg_price, color=color, linewidth=0.8, linestyle=':', alpha=0.8)
+
+                if show_nominal_ghost:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=stock_data.index, y=stock_data['Close'], mode='lines',
+                            name=f'{display_name} Nominal', line=dict(color=color, width=1, dash='dot'),
+                            yaxis='y1', opacity=0.5,
+                            hovertemplate=f'Fecha: %{{x|%Y-%m-%d}}<br>Nominal: %{{y:.2f}} {moneda}<extra></extra>'
+                        )
+                    )
+                    ax_mpl.plot(
+                        stock_data.index, stock_data['Close'], color=color, linewidth=1,
+                        linestyle=':', alpha=0.5, label=f'{display_name} Nominal'
+                    )
+
+            if i == 0 and len(stock_data) > 0:
+                stock_data['SMA'] = stock_data['Inflation_Adjusted_Close'].rolling(window=sma_period).mean()
+                fig.add_trace(
+                    go.Scatter(
+                        x=stock_data.index, y=stock_data['SMA'], mode='lines', name=f'{display_name} SMA',
+                        line=dict(color='orange', width=1), yaxis='y1',
+                        hovertemplate=f'Fecha: %{{x|%Y-%m-%d}}<br>SMA: %{{y:.2f}} {moneda}<extra></extra>'
+                    )
+                )
+                ax_mpl.plot(stock_data.index, stock_data['SMA'], color='orange', linewidth=1, label=f'{display_name} SMA')
+
+            for split in st.session_state.custom_splits:
+                if split["ticker"] == ticker:
+                    split_dt = datetime.combine(split["date"], datetime.min.time())
+                    fig.add_vline(
+                        x=split_dt.timestamp() * 1000, line=dict(color="white", width=1, dash="dash"),
+                        annotation_text=f"Split {split['ratio']}:1", annotation_position="top",
+                        annotation=dict(font=dict(color='white'))
+                    )
+                    ax_mpl.axvline(split_dt, color='white', linewidth=1, linestyle='--', alpha=0.7)
+
+            for event in st.session_state.custom_events:
+                if event["ticker"] == ticker:
+                    event_dt = datetime.combine(event["date"], datetime.min.time())
+                    fig.add_vline(
+                        x=event_dt.timestamp() * 1000, line=dict(color="yellow", width=1, dash="dot"),
+                        annotation_text=event["description"], annotation_position="top",
+                        annotation=dict(font=dict(color='yellow'))
+                    )
+                    ax_mpl.axvline(event_dt, color='yellow', linewidth=1, linestyle=':', alpha=0.7)
+
+        except Exception as e:
+            st.error(f"Error procesando {ticker}: {e}")
+            logger.error(f"Error processing {ticker}: {e}")
+            continue
+
+    fig.add_annotation(
+        text="MTaurus - X: mtaurus_ok", xref="paper", yref="paper", x=0.5, y=0.5,
+        showarrow=False, font=dict(size=30, color="rgba(255, 255, 255, 0.2)"), opacity=0.15
+    )
+
+    titulo_base = f'Precios Históricos Ajustados por Inflación ({moneda})'
+    titulo = titulo_base if not is_percentage_mode else f'{titulo_base} (%)'
+    ylabel = f'Precio de Cierre Ajustado ({moneda})' if not is_percentage_mode else 'Variación Porcentual (%)'
+
+    fig.update_layout(
+        title=dict(text=titulo, font=dict(size=20, color='white')),
+        xaxis_title=dict(text='Fecha', font=dict(size=14, color='white')),
+        yaxis_title=dict(text=ylabel, font=dict(size=14, color='white')),
+        **plot_style
+    )
+    fig.update_yaxes(
+        type='log' if use_log_scale else 'linear',
+        tickformat=',.2f',
+        ticksuffix='' if not is_percentage_mode else '%'
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    _finalizar_grafico_mpl(fig_mpl, ax_mpl, titulo, ylabel, is_percentage_mode, use_log_scale)
+    st.pyplot(fig_mpl)
+    plt.close(fig_mpl)
+
+    return stock_data_dict_nominal, stock_data_dict_adjusted, ticker_var_map
 
 # ------------------------------
 # Diccionario de tickers y sus divisores
@@ -813,198 +1097,31 @@ with tab2:
     else:
         use_log_scale_arg = False
 
+    show_nominal_ghost_arg = st.checkbox(
+        'Incluir línea fantasma con el valor nominal (sin ajustar por inflación)',
+        value=False,
+        key='show_nominal_ghost_arg'
+    )
+
     # Diccionarios para almacenar datos (for Argentine tab)
     stock_data_dict_nominal_arg = {}
     stock_data_dict_adjusted_arg = {}
 
     if tickers_input:
-        tickers = [ticker.strip().upper() for ticker in tickers_input.split(',')]
-        fig = go.Figure()
-        ticker_var_map = {ticker: ticker.replace('.', '_') for ticker in tickers}
-
-        for i, ticker in enumerate(tickers):
-            try:
-                stock_data = descargar_datos(ticker, plot_start_date, daily_cpi.index.max().date() + timedelta(days=1), data_source)
-
-                if stock_data.empty:
-                    st.error(f"No se encontraron datos para el ticker {ticker}.")
-                    continue
-
-                if 'Date' in stock_data.columns:
-                    stock_data.set_index('Date', inplace=True)
-                stock_data.index = pd.to_datetime(stock_data.index)
-                if stock_data.index.tz is not None:
-                    stock_data.index = stock_data.index.tz_localize(None)
-
-                if data_source in ['IOL (Invertir Online)', 'ByMA Data']:
-                    if len(stock_data.columns) == 1:
-                        stock_data = stock_data.rename(columns={stock_data.columns[0]: 'Close'})
-
-                stock_data.index = stock_data.index.tz_localize(None)
-                stock_data.index = stock_data.index.normalize()
-
-                stock_data = ajustar_precios_por_splits(stock_data, ticker)
-
-                needs_inflation_adjustment = force_inflation_arg or (
-                    (data_source == 'YFinance' and (ticker.endswith('.BA') or ticker == '^MERV')) or
-                    (data_source != 'YFinance')
-                )
-
-                if needs_inflation_adjustment and not stock_data.empty:
-                    daily_cpi_clean = daily_cpi.copy()
-                    daily_cpi_clean.index = pd.to_datetime(daily_cpi_clean.index).normalize()
-                    stock_data = pd.merge(
-                        stock_data,
-                        daily_cpi_clean,
-                        left_index=True,
-                        right_index=True,
-                        how='left'
-                    )
-                    stock_data['Cumulative_Inflation'] = stock_data['Cumulative_Inflation'].ffill().bfill()
-                    if not stock_data.empty:
-                        last_cpi = stock_data['Cumulative_Inflation'].iloc[-1]
-                        stock_data['Inflation_Adjusted_Close'] = stock_data['Close'] * (
-                            last_cpi / stock_data['Cumulative_Inflation']
-                        )
-                    else:
-                        stock_data['Inflation_Adjusted_Close'] = stock_data['Close']
-                else:
-                    stock_data['Inflation_Adjusted_Close'] = stock_data['Close']
-
-                if stock_data.empty:
-                    st.error(f"No hay datos suficientes para procesar {ticker}.")
-                    continue
-
-                var_name = ticker_var_map[ticker]
-                stock_data_dict_nominal_arg[var_name] = stock_data['Close']
-                stock_data_dict_adjusted_arg[var_name] = stock_data['Inflation_Adjusted_Close']
-
-                display_name = f'{ticker[:10]}...' if len(ticker) > 10 else ticker
-
-                if is_percentage_mode:
-                    if show_percentage_from_recent and len(stock_data) > 0:
-                        pct_change = ((stock_data['Inflation_Adjusted_Close'].iloc[-1] /
-                                       stock_data['Inflation_Adjusted_Close']) - 1) * 100
-                        pct_change = pct_change.clip(lower=-100)
-                    else:
-                        pct_change = (stock_data['Inflation_Adjusted_Close'] /
-                                      stock_data['Inflation_Adjusted_Close'].iloc[0] - 1) * 100
-
-                    fig.add_trace(
-                        go.Scatter(
-                            x=stock_data.index,
-                            y=pct_change,
-                            mode='lines',
-                            name=f'{display_name} (%)',
-                            line=dict(color=colors[i % len(colors)], width=1.5),
-                            yaxis='y1',
-                            hovertemplate='Fecha: %{x|%Y-%m-%d}<br>Variación: %{y:.2f}%<extra></extra>'
-                        )
-                    )
-                    fig.add_shape(
-                        type="line",
-                        x0=stock_data.index.min(),
-                        x1=stock_data.index.max(),
-                        y0=0,
-                        y1=0,
-                        line=dict(color="rgba(255, 0, 0, 0.5)", width=1, dash="dash"),
-                        xref="x",
-                        yref="y1"
-                    )
-                else:
-                    fig.add_trace(
-                        go.Scatter(
-                            x=stock_data.index,
-                            y=stock_data['Inflation_Adjusted_Close'],
-                            mode='lines',
-                            name=display_name,
-                            line=dict(color=colors[i % len(colors)], width=1.5),
-                            yaxis='y1',
-                            hovertemplate='Fecha: %{x|%Y-%m-%d}<br>Precio: %{y:.2f} ARS<extra></extra>'
-                        )
-                    )
-                    avg_price = stock_data['Inflation_Adjusted_Close'].mean()
-                    fig.add_trace(
-                        go.Scatter(
-                            x=stock_data.index,
-                            y=[avg_price] * len(stock_data),
-                            mode='lines',
-                            name=f'{display_name} Avg',
-                            line=dict(color=colors[i % len(colors)], width=0.8, dash='dot'),
-                            yaxis='y1',
-                            hovertemplate='Fecha: %{x|%Y-%m-%d}<br>Promedio: %{y:.2f} ARS<extra></extra>'
-                        )
-                    )
-
-                if i == 0 and len(stock_data) > 0:
-                    stock_data['SMA'] = stock_data['Inflation_Adjusted_Close'].rolling(window=sma_period).mean()
-                    fig.add_trace(
-                        go.Scatter(
-                            x=stock_data.index,
-                            y=stock_data['SMA'],
-                            mode='lines',
-                            name=f'{display_name} SMA',
-                            line=dict(color='orange', width=1),
-                            yaxis='y1',
-                            hovertemplate='Fecha: %{x|%Y-%m-%d}<br>SMA: %{y:.2f} ARS<extra></extra>'
-                        )
-                    )
-
-                # Add split annotations
-                for split in st.session_state.custom_splits:
-                    if split["ticker"] == ticker:
-                        fig.add_vline(
-                            x=datetime.combine(split["date"], datetime.min.time()).timestamp() * 1000,
-                            line=dict(color="white", width=1, dash="dash"),
-                            annotation_text=f"Split {split['ratio']}:1",
-                            annotation_position="top",
-                            annotation=dict(font=dict(color='white'))
-                        )
-                # Add event annotations
-                for event in st.session_state.custom_events:
-                    if event["ticker"] == ticker:
-                        fig.add_vline(
-                            x=datetime.combine(event["date"], datetime.min.time()).timestamp() * 1000,
-                            line=dict(color="yellow", width=1, dash="dot"),
-                            annotation_text=event["description"],
-                            annotation_position="top",
-                            annotation=dict(font=dict(color='yellow'))
-                        )
-            except Exception as e:
-                st.error(f"Error procesando {ticker}: {e}")
-                logger.error(f"Error processing {ticker}: {e}")
-                continue
-
-        fig.add_annotation(
-            text="MTaurus - X: mtaurus_ok",
-            xref="paper", yref="paper",
-            x=0.5, y=0.5,
-            showarrow=False,
-            font=dict(size=30, color="rgba(255, 255, 255, 0.2)"),
-            opacity=0.15
+        stock_data_dict_nominal_arg, stock_data_dict_adjusted_arg, ticker_var_map = graficar_activos_ajustados(
+            tickers_input=tickers_input,
+            sma_period=sma_period,
+            plot_start_date=plot_start_date,
+            daily_cpi_serie=daily_cpi,
+            data_source=data_source,
+            moneda='ARS',
+            is_percentage_mode=is_percentage_mode,
+            show_percentage_from_recent=show_percentage_from_recent,
+            use_log_scale=use_log_scale_arg,
+            show_nominal_ghost=show_nominal_ghost_arg,
+            siempre_ajustar=False,
+            force_inflation=force_inflation_arg,
         )
-
-        fig.update_layout(
-            title=dict(
-                text='Precios Históricos Ajustados por Inflación' if not is_percentage_mode else 'Precios Históricos Ajustados por Inflación (%)',
-                font=dict(size=20, color='white')
-            ),
-            xaxis_title=dict(text='Fecha', font=dict(size=14, color='white')),
-            yaxis_title=dict(
-                text='Precio de Cierre Ajustado (ARS)' if not is_percentage_mode else 'Variación Porcentual (%)',
-                font=dict(size=14, color='white')
-            ),
-            **plot_style
-        )
-
-        # Update yaxis for log scale and formatting
-        fig.update_yaxes(
-            type='log' if use_log_scale_arg else 'linear',
-            tickformat=',.2f' if not is_percentage_mode else ',.2f',
-            ticksuffix='' if not is_percentage_mode else '%'
-        )
-
-        st.plotly_chart(fig)
 
 with tab3:
     st.subheader('Cálculos o Ratios Personalizados')
@@ -1361,191 +1478,27 @@ with tab5:
     else:
         use_log_scale_us = False
 
+    show_nominal_ghost_us = st.checkbox(
+        'Incluir línea fantasma con el valor nominal (sin ajustar por inflación)',
+        value=False,
+        key='show_nominal_ghost_us'
+    )
+
     # Diccionarios para almacenar datos (for US tab)
     stock_data_dict_nominal_us = {}
     stock_data_dict_adjusted_us = {}
 
     if tickers_input_us:
-        tickers = [ticker.strip().upper() for ticker in tickers_input_us.split(',')]
-        fig_us = go.Figure()
-        ticker_var_map_us = {ticker: ticker.replace('.', '_') for ticker in tickers}
-
-        for i, ticker in enumerate(tickers):
-            try:
-                stock_data = descargar_datos(ticker, plot_start_date_us, daily_us_cpi.index.max().date() + timedelta(days=1), data_source)
-
-                if stock_data.empty:
-                    st.error(f"No se encontraron datos para el ticker {ticker}.")
-                    continue
-
-                if 'Date' in stock_data.columns:
-                    stock_data.set_index('Date', inplace=True)
-                stock_data.index = pd.to_datetime(stock_data.index)
-                if stock_data.index.tz is not None:
-                    stock_data.index = stock_data.index.tz_localize(None)
-
-                if data_source in ['IOL (Invertir Online)', 'ByMA Data']:
-                    if len(stock_data.columns) == 1:
-                        stock_data = stock_data.rename(columns={stock_data.columns[0]: 'Close'})
-
-                stock_data.index = stock_data.index.tz_localize(None)
-                stock_data.index = stock_data.index.normalize()
-
-                stock_data = ajustar_precios_por_splits(stock_data, ticker)
-
-                # For US tab, always apply inflation adjustment (change if needed)
-                if not stock_data.empty:
-                    daily_us_cpi_clean = daily_us_cpi.copy()
-                    daily_us_cpi_clean.index = pd.to_datetime(daily_us_cpi_clean.index).normalize()
-                    stock_data = pd.merge(
-                        stock_data,
-                        daily_us_cpi_clean,
-                        left_index=True,
-                        right_index=True,
-                        how='left'
-                    )
-                    stock_data['Cumulative_Inflation'] = stock_data['Cumulative_Inflation'].ffill().bfill()
-                    if not stock_data.empty:
-                        last_cpi = stock_data['Cumulative_Inflation'].iloc[-1]
-                        stock_data['Inflation_Adjusted_Close'] = stock_data['Close'] * (
-                            last_cpi / stock_data['Cumulative_Inflation']
-                        )
-                    else:
-                        stock_data['Inflation_Adjusted_Close'] = stock_data['Close']
-                else:
-                    stock_data['Inflation_Adjusted_Close'] = stock_data['Close']
-
-                if stock_data.empty:
-                    st.error(f"No hay datos suficientes para procesar {ticker}.")
-                    continue
-
-                var_name = ticker_var_map_us[ticker]
-                stock_data_dict_nominal_us[var_name] = stock_data['Close']
-                stock_data_dict_adjusted_us[var_name] = stock_data['Inflation_Adjusted_Close']
-
-                display_name = f'{ticker[:10]}...' if len(ticker) > 10 else ticker
-
-                if is_percentage_mode_us:
-                    if show_percentage_from_recent_us and len(stock_data) > 0:
-                        pct_change = ((stock_data['Inflation_Adjusted_Close'].iloc[-1] /
-                                       stock_data['Inflation_Adjusted_Close']) - 1) * 100
-                        pct_change = pct_change.clip(lower=-100)
-                    else:
-                        pct_change = (stock_data['Inflation_Adjusted_Close'] /
-                                      stock_data['Inflation_Adjusted_Close'].iloc[0] - 1) * 100
-
-                    fig_us.add_trace(
-                        go.Scatter(
-                            x=stock_data.index,
-                            y=pct_change,
-                            mode='lines',
-                            name=f'{display_name} (%)',
-                            line=dict(color=colors[i % len(colors)], width=1.5),
-                            yaxis='y1',
-                            hovertemplate='Fecha: %{x|%Y-%m-%d}<br>Variación: %{y:.2f}%<extra></extra>'
-                        )
-                    )
-                    fig_us.add_shape(
-                        type="line",
-                        x0=stock_data.index.min(),
-                        x1=stock_data.index.max(),
-                        y0=0,
-                        y1=0,
-                        line=dict(color="rgba(255, 0, 0, 0.5)", width=1, dash="dash"),
-                        xref="x",
-                        yref="y1"
-                    )
-                else:
-                    fig_us.add_trace(
-                        go.Scatter(
-                            x=stock_data.index,
-                            y=stock_data['Inflation_Adjusted_Close'],
-                            mode='lines',
-                            name=display_name,
-                            line=dict(color=colors[i % len(colors)], width=1.5),
-                            yaxis='y1',
-                            hovertemplate='Fecha: %{x|%Y-%m-%d}<br>Precio: %{y:.2f} USD<extra></extra>'  # Changed to USD for US context
-                        )
-                    )
-                    avg_price = stock_data['Inflation_Adjusted_Close'].mean()
-                    fig_us.add_trace(
-                        go.Scatter(
-                            x=stock_data.index,
-                            y=[avg_price] * len(stock_data),
-                            mode='lines',
-                            name=f'{display_name} Avg',
-                            line=dict(color=colors[i % len(colors)], width=0.8, dash='dot'),
-                            yaxis='y1',
-                            hovertemplate='Fecha: %{x|%Y-%m-%d}<br>Promedio: %{y:.2f} USD<extra></extra>'
-                        )
-                    )
-
-                if i == 0 and len(stock_data) > 0:
-                    stock_data['SMA'] = stock_data['Inflation_Adjusted_Close'].rolling(window=sma_period_us).mean()
-                    fig_us.add_trace(
-                        go.Scatter(
-                            x=stock_data.index,
-                            y=stock_data['SMA'],
-                            mode='lines',
-                            name=f'{display_name} SMA',
-                            line=dict(color='orange', width=1),
-                            yaxis='y1',
-                            hovertemplate='Fecha: %{x|%Y-%m-%d}<br>SMA: %{y:.2f} USD<extra></extra>'
-                        )
-                    )
-
-                # Add split annotations
-                for split in st.session_state.custom_splits:
-                    if split["ticker"] == ticker:
-                        fig_us.add_vline(
-                            x=datetime.combine(split["date"], datetime.min.time()).timestamp() * 1000,
-                            line=dict(color="white", width=1, dash="dash"),
-                            annotation_text=f"Split {split['ratio']}:1",
-                            annotation_position="top",
-                            annotation=dict(font=dict(color='white'))
-                        )
-                # Add event annotations
-                for event in st.session_state.custom_events:
-                    if event["ticker"] == ticker:
-                        fig_us.add_vline(
-                            x=datetime.combine(event["date"], datetime.min.time()).timestamp() * 1000,
-                            line=dict(color="yellow", width=1, dash="dot"),
-                            annotation_text=event["description"],
-                            annotation_position="top",
-                            annotation=dict(font=dict(color='yellow'))
-                        )
-            except Exception as e:
-                st.error(f"Error procesando {ticker}: {e}")
-                logger.error(f"Error processing {ticker}: {e}")
-                continue
-
-        fig_us.add_annotation(
-            text="MTaurus - X: mtaurus_ok",
-            xref="paper", yref="paper",
-            x=0.5, y=0.5,
-            showarrow=False,
-            font=dict(size=30, color="rgba(255, 255, 255, 0.2)"),
-            opacity=0.15
+        stock_data_dict_nominal_us, stock_data_dict_adjusted_us, ticker_var_map_us = graficar_activos_ajustados(
+            tickers_input=tickers_input_us,
+            sma_period=sma_period_us,
+            plot_start_date=plot_start_date_us,
+            daily_cpi_serie=daily_us_cpi,
+            data_source=data_source,
+            moneda='USD',
+            is_percentage_mode=is_percentage_mode_us,
+            show_percentage_from_recent=show_percentage_from_recent_us,
+            use_log_scale=use_log_scale_us,
+            show_nominal_ghost=show_nominal_ghost_us,
+            siempre_ajustar=True,
         )
-
-        fig_us.update_layout(
-            title=dict(
-                text='Precios Históricos Ajustados por Inflación (USA)' if not is_percentage_mode_us else 'Precios Históricos Ajustados por Inflación (USA) (%)',
-                font=dict(size=20, color='white')
-            ),
-            xaxis_title=dict(text='Fecha', font=dict(size=14, color='white')),
-            yaxis_title=dict(
-                text='Precio de Cierre Ajustado (USD)' if not is_percentage_mode_us else 'Variación Porcentual (%)',
-                font=dict(size=14, color='white')
-            ),
-            **plot_style
-        )
-
-        # Update yaxis for log scale and formatting
-        fig_us.update_yaxes(
-            type='log' if use_log_scale_us else 'linear',
-            tickformat=',.2f' if not is_percentage_mode_us else ',.2f',
-            ticksuffix='' if not is_percentage_mode_us else '%'
-        )
-
-        st.plotly_chart(fig_us)
