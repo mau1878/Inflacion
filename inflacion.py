@@ -100,10 +100,17 @@ def _finalizar_grafico_mpl(fig, ax, titulo, ylabel_txt, is_percentage, use_log_s
         0.5, 0.5, "MTaurus - X: mtaurus_ok", transform=ax.transAxes,
         fontsize=24, color='white', alpha=0.12, ha='center', va='center'
     )
+    fig.tight_layout()
     handles, labels = ax.get_legend_handles_labels()
     if handles:
-        ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.2), ncol=3, fontsize=8)
-    fig.tight_layout()
+        ncols = min(len(labels), 3)
+        filas_leyenda = -(-len(labels) // ncols)  # redondeo hacia arriba
+        espacio_inferior = 0.22 + 0.06 * filas_leyenda
+        fig.subplots_adjust(bottom=espacio_inferior)
+        ax.legend(
+            loc='upper center', bbox_to_anchor=(0.5, -espacio_inferior * 1.35),
+            ncol=ncols, fontsize=8
+        )
 
 
 def graficar_activos_ajustados(
@@ -319,7 +326,8 @@ def graficar_activos_ajustados(
         showarrow=False, font=dict(size=30, color="rgba(255, 255, 255, 0.2)"), opacity=0.15
     )
 
-    titulo_base = f'Precios Históricos Ajustados por Inflación ({moneda})'
+    tickers_titulo = ', '.join(tickers) if len(tickers) <= 3 else f"{len(tickers)} tickers"
+    titulo_base = f'Precios Históricos Ajustados por Inflación ({moneda}) - {tickers_titulo}'
     titulo = titulo_base if not is_percentage_mode else f'{titulo_base} (%)'
     ylabel = f'Precio de Cierre Ajustado ({moneda})' if not is_percentage_mode else 'Variación Porcentual (%)'
 
