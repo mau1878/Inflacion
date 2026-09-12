@@ -766,19 +766,36 @@ def load_cpi_data():
         response = requests.get(url, timeout=15)
         response.raise_for_status()
         data = response.json()
+        cpi_api = pd.DataFrame(data)
+        cpi_api = cpi_api.rename(columns={"fecha": "Date", "valor": "CPI_MoM_pct"})
+        cpi_api["Date"] = pd.to_datetime(cpi_api["Date"])
+        cpi_api["CPI_MoM"] = cpi_api["CPI_MoM_pct"] / 100.0
+        cpi_api.set_index("Date", inplace=True)
+        cpi_api = cpi_api[["CPI_MoM"]]
 
-        cpi = pd.DataFrame(data)
-        cpi = cpi.rename(columns={"fecha": "Date", "valor": "CPI_MoM_pct"})
-        cpi["Date"] = pd.to_datetime(cpi["Date"])
-        cpi["CPI_MoM"] = cpi["CPI_MoM_pct"] / 100.0
-        cpi.set_index("Date", inplace=True)
+        # 2007-2016: se prefiere el CSV curado por la manipulación histórica del INDEC.
+        try:
+            cpi_csv = pd.read_csv('inflaciónargentina2.csv')
+            cpi_csv['Date'] = pd.to_datetime(cpi_csv['Date'], format='%d/%m/%Y')
+            cpi_csv.set_index('Date', inplace=True)
+            cpi_csv = cpi_csv[['CPI_MoM']]
+
+            mask_indec = (cpi_api.index >= '2007-01-01') & (cpi_api.index <= '2016-12-31')
+            cpi_api = cpi_api[~mask_indec]
+
+            mask_csv = (cpi_csv.index >= '2007-01-01') & (cpi_csv.index <= '2016-12-31')
+            cpi_curado = cpi_csv[mask_csv]
+
+            cpi = pd.concat([cpi_api, cpi_curado]).sort_index()
+            cpi = cpi[~cpi.index.duplicated(keep='last')]
+        except Exception as e:
+            logger.warning(f"No se pudo aplicar el CSV curado 2007-2016 ({e}). Usando solo API.")
+            cpi = cpi_api
 
         cpi_extendido, ultima_fecha_real = _extrapolar_hasta_hoy(cpi)
         daily = _construir_serie_diaria(cpi_extendido)
-
         st.session_state['ipc_arg_ultima_fecha_real'] = ultima_fecha_real
         return daily
-
     except Exception as e:
         st.warning(f"No se pudo obtener el IPC de la API ({e}). Usando CSV local como respaldo.")
         return _load_cpi_data_csv_fallback()
@@ -807,13 +824,11 @@ def load_us_cpi_data():
         api_key = os.environ.get("FRED_API_KEY") or st.secrets.get("FRED_API_KEY", None)
         if not api_key:
             raise ValueError("Falta FRED_API_KEY (variable de entorno o st.secrets).")
-
         url = "https://api.stlouisfed.org/fred/series/observations"
         params = {"series_id": "CPIAUCSL", "api_key": api_key, "file_type": "json"}
         response = requests.get(url, params=params, timeout=15)
         response.raise_for_status()
         data = response.json()["observations"]
-
         cpi = pd.DataFrame(data)[["date", "value"]]
         cpi = cpi.rename(columns={"date": "Date", "value": "CPI_Level"})
         cpi["Date"] = pd.to_datetime(cpi["Date"])
@@ -821,17 +836,33 @@ def load_us_cpi_data():
         cpi.dropna(subset=["CPI_Level"], inplace=True)
         cpi.set_index("Date", inplace=True)
         cpi.sort_index(inplace=True)
-
-        # Convertimos nivel de índice a tasa mensual para poder extrapolar igual que Argentina
         cpi["CPI_MoM"] = cpi["CPI_Level"].pct_change()
         cpi.dropna(subset=["CPI_MoM"], inplace=True)
+        cpi_api = cpi[["CPI_MoM"]]
+
+        # La API (CPIAUCSL, desestacionalizada) arranca en 1947. Se completa con el
+        # CSV para 1913-1946 (única serie oficial disponible para ese tramo; no está
+        # desestacionalizada, pero no hay superposición de fechas con la API).
+        try:
+            url_csv = "https://raw.githubusercontent.com/mau1878/Inflacion/refs/heads/main/inflaci%C3%B3nUSA.csv"
+            cpi_csv = pd.read_csv(url_csv)
+            cpi_csv['Date'] = pd.to_datetime(cpi_csv['Date'], format='%d/%m/%Y')
+            cpi_csv.set_index('Date', inplace=True)
+            cpi_csv = cpi_csv[['CPI_MoM']]
+
+            primera_fecha_api = cpi_api.index.min()
+            cpi_pre_api = cpi_csv[cpi_csv.index < primera_fecha_api]
+
+            cpi = pd.concat([cpi_pre_api, cpi_api]).sort_index()
+            cpi = cpi[~cpi.index.duplicated(keep='last')]
+        except Exception as e:
+            logger.warning(f"No se pudo completar el CPI de EE.UU. con el CSV pre-1947 ({e}). Usando solo API.")
+            cpi = cpi_api
 
         cpi_extendido, ultima_fecha_real = _extrapolar_hasta_hoy(cpi)
         daily = _construir_serie_diaria(cpi_extendido)
-
         st.session_state['ipc_usa_ultima_fecha_real'] = ultima_fecha_real
         return daily
-
     except Exception as e:
         st.warning(f"No se pudo obtener el CPI de EE.UU. desde FRED ({e}). Usando CSV de respaldo.")
         return _load_us_cpi_data_csv_fallback()
