@@ -1113,16 +1113,51 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs(["Inflation Calculator", "Argentine Stock
 
 with tab1:
     st.subheader('Calculador de precios por inflación (Argentina)')
+
+    st.markdown("""
+    Esta calculadora te dice cuánto valdría **hoy** una plata que tenías en el pasado
+    (o cuánto necesitabas en el pasado para comprar lo mismo que hoy).
+
+    **Dos efectos separados que hay que tener en cuenta:**
+    1. **Inflación**: con el tiempo, los precios suben y el dinero pierde poder de compra.
+    2. **Cambios de moneda**: además de la inflación, Argentina cambió de moneda varias
+       veces y le "sacó ceros" a los billetes para simplificarlos:
+       - Peso Moneda Nacional (hasta 1970)
+       - Peso Ley 18.188 (1970 en adelante, se sacaron 2 ceros)
+       - Peso Argentino (1983 en adelante, se sacaron 4 ceros)
+       - Austral (1985 en adelante, se sacaron 3 ceros)
+       - Peso (1992 en adelante, se sacaron 4 ceros — es la moneda actual)
+
+       Por ejemplo: $10.000.000 de Pesos Moneda Nacional (antes de 1970) equivalen,
+       **solo por los cambios de moneda** (sin contar la inflación), a $1 Peso actual.
+    """)
+
     value_choice = st.radio(
-        "¿Quieres ingresar el valor para la fecha de inicio o la fecha de fin?",
+        "¿Qué querés calcular?",
         ('Fecha de Inicio', 'Fecha de Fin'),
+        captions=[
+            "Tengo un monto en el pasado y quiero saber cuánto vale hoy",
+            "Tengo un monto de hoy y quiero saber cuánto necesitaba en el pasado"
+        ],
         key='value_choice_radio'
     )
+
     incluir_cambios_moneda = st.checkbox(
-        'Tener en cuenta los cambios de moneda históricos '
-        '(Peso Moneda Nacional → Ley 18.188 → Peso Argentino → Austral → Peso)',
+        'Tener en cuenta los cambios de moneda (además de la inflación)',
         value=True,
+        help=(
+            "Si lo dejás tildado, además del ajuste por inflación te muestro el "
+            "equivalente en Pesos de hoy, aplicando también la quita de ceros de "
+            "cada cambio de moneda. Si lo destildás, solo ves el ajuste por "
+            "inflación, en la moneda de esa época."
+        ),
         key='incluir_cambios_moneda'
+    )
+
+    st.caption(
+        "⚠️ Estos cálculos son aproximados: usan el IPC mensual interpolado día a día. "
+        "Cuanto más largo el período o más alta la inflación acumulada, menos exacto "
+        "es el resultado en el día a día (aunque el número final es confiable)."
     )
 
     if value_choice == 'Fecha de Inicio':
@@ -1141,7 +1176,7 @@ with tab1:
             key='end_date_input'
         )
         start_value = st.number_input(
-            'Ingresa el valor en la fecha de inicio (en ARS):',
+            'Ingresa el monto que tenías en la fecha de inicio:',
             min_value=0.0,
             value=100.0,
             key='start_value_input'
@@ -1159,12 +1194,19 @@ with tab1:
             start_fmt, _ = format_arg_amount(start_value)
             end_fmt, end_fmt_sci = format_arg_amount(end_value_misma_moneda)
 
-            st.write(f"Valor inicial el {start_date}: {moneda_inicio} {start_fmt}")
+            st.markdown("#### Resultado")
+            st.write(f"**Monto original:** {moneda_inicio} {start_fmt} (al {start_date.strftime('%d/%m/%Y')})")
             st.caption(amount_to_words(start_value, moneda_inicio))
 
             st.write(
-                f"Ajustado por inflación (misma moneda, {moneda_inicio}): {moneda_inicio} {end_fmt}"
+                f"**Ajustado solo por inflación**, en la misma moneda de esa época "
+                f"({moneda_inicio}): {moneda_inicio} {end_fmt}"
                 + (f" ({end_fmt_sci})" if end_fmt_sci else "")
+            )
+            st.caption(
+                f"Esto responde: ¿cuántos {moneda_inicio} necesitarías hoy, "
+                f"**en esa misma moneda vieja**, para tener el mismo poder de compra? "
+                "No tiene en cuenta que esa moneda ya no existe."
             )
             st.caption(amount_to_words(end_value_misma_moneda, moneda_inicio))
 
@@ -1175,15 +1217,22 @@ with tab1:
                 pesos_ini_fmt, pesos_ini_sci = format_arg_amount(start_en_pesos_actuales, 8)
                 pesos_fin_fmt, pesos_fin_sci = format_arg_amount(end_en_pesos_actuales)
 
+                st.write("---")
                 st.write(
-                    f"Equivalente en Pesos actuales, solo por cambio de moneda (sin inflación): ARS {pesos_ini_fmt}"
+                    f"**Solo por el cambio de moneda** (sin inflación), esos "
+                    f"{moneda_inicio} {start_fmt} equivalen hoy a: ARS {pesos_ini_fmt}"
                     + (f" ({pesos_ini_sci})" if pesos_ini_sci else "")
                 )
                 st.caption(amount_to_words(start_en_pesos_actuales, 'pesos', 8))
 
                 st.write(
-                    f"Ajustado por inflación y cambio de moneda, en Pesos actuales: ARS {pesos_fin_fmt}"
-                    + (f" ({pesos_fin_sci})" if pesos_fin_sci else "")
+                    f"**Resultado final (inflación + cambio de moneda), en Pesos actuales:** "
+                    f"ARS {pesos_fin_fmt}" + (f" ({pesos_fin_sci})" if pesos_fin_sci else "")
+                )
+                st.caption(
+                    "Este es el número más útil en la práctica: cuántos Pesos de hoy "
+                    "necesitarías para tener el mismo poder de compra que tenías en la "
+                    "fecha de inicio, contando todo (inflación y cambios de moneda)."
                 )
                 st.caption(amount_to_words(end_en_pesos_actuales, 'pesos'))
         except KeyError as e:
@@ -1205,7 +1254,7 @@ with tab1:
             key='end_date_end_date_input'
         )
         end_value = st.number_input(
-            'Ingresa el valor en la fecha de fin (en ARS):',
+            'Ingresa el monto que tenés en la fecha de fin:',
             min_value=0.0,
             value=100.0,
             key='end_value_input'
@@ -1225,12 +1274,18 @@ with tab1:
             end_fmt, _ = format_arg_amount(end_value)
             start_fmt, start_fmt_sci = format_arg_amount(start_value_misma_moneda)
 
-            st.write(f"Valor final el {end_date}: {moneda_fin} {end_fmt}")
+            st.markdown("#### Resultado")
+            st.write(f"**Monto de referencia:** {moneda_fin} {end_fmt} (al {end_date.strftime('%d/%m/%Y')})")
             st.caption(amount_to_words(end_value, moneda_fin))
 
             st.write(
-                f"Deflactado a la fecha de inicio (misma moneda, {moneda_fin}): {moneda_fin} {start_fmt}"
-                + (f" ({start_fmt_sci})" if start_fmt_sci else "")
+                f"**Deflactado solo por inflación**, en la misma moneda ({moneda_fin}): "
+                f"{moneda_fin} {start_fmt}" + (f" ({start_fmt_sci})" if start_fmt_sci else "")
+            )
+            st.caption(
+                f"Esto responde: ¿cuántos {moneda_fin} necesitabas en la fecha de "
+                "inicio para tener el mismo poder de compra? Sin tener en cuenta "
+                "que en esa época podía existir otra moneda."
             )
             st.caption(amount_to_words(start_value_misma_moneda, moneda_fin))
 
@@ -1242,15 +1297,22 @@ with tab1:
                 pesos_fin_fmt, pesos_fin_sci = format_arg_amount(end_en_pesos_actuales)
                 hist_fmt, hist_sci = format_arg_amount(start_moneda_historica, 8)
 
+                st.write("---")
                 st.write(
-                    f"Equivalente en Pesos actuales al {end_date}, solo por cambio de moneda: ARS {pesos_fin_fmt}"
-                    + (f" ({pesos_fin_sci})" if pesos_fin_sci else "")
+                    f"**Solo por el cambio de moneda**, ese monto equivale hoy a: "
+                    f"ARS {pesos_fin_fmt}" + (f" ({pesos_fin_sci})" if pesos_fin_sci else "")
                 )
                 st.caption(amount_to_words(end_en_pesos_actuales, 'pesos'))
 
                 st.write(
-                    f"Deflactado y convertido a la moneda vigente el {start_date} ({moneda_inicio}): "
+                    f"**Resultado final, en la moneda que circulaba el "
+                    f"{start_date.strftime('%d/%m/%Y')} ({moneda_inicio}):** "
                     f"{moneda_inicio} {hist_fmt}" + (f" ({hist_sci})" if hist_sci else "")
+                )
+                st.caption(
+                    f"Esto te dice cuántos billetes de {moneda_inicio} necesitabas en "
+                    "esa fecha para comprar lo mismo que hoy — contando inflación y "
+                    "cambios de moneda."
                 )
                 st.caption(amount_to_words(start_moneda_historica, moneda_inicio, 8))
         except KeyError as e:
