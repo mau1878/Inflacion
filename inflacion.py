@@ -1223,7 +1223,6 @@ with tab1:
                     f"{moneda_inicio} {start_fmt} equivalen hoy a: ARS {pesos_ini_fmt}"
                     + (f" ({pesos_ini_sci})" if pesos_ini_sci else "")
                 )
-                st.caption(amount_to_words(start_en_pesos_actuales, 'pesos', 8))
 
                 st.write(
                     f"**Resultado final (inflación + cambio de moneda), en Pesos actuales:** "
@@ -1314,7 +1313,7 @@ with tab1:
                     "esa fecha para comprar lo mismo que hoy — contando inflación y "
                     "cambios de moneda."
                 )
-                st.caption(amount_to_words(start_moneda_historica, moneda_inicio, 8))
+                st.caption(amount_to_words(start_moneda_historica, moneda_inicio))
         except KeyError as e:
             st.error(f"Error al obtener la inflación para las fechas seleccionadas: {e}")
 
