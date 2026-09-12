@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import matplotlib.ticker as mticker
 import seaborn as sns
+from num2words import num2words
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -396,7 +397,34 @@ splits = {
     'ECOG.BA': {'ratio': 10, 'date': datetime(2025, 8, 18)},
 }
 
+# --- Redenominaciones de la moneda argentina (fechas fijas, históricas) ---
+redenominations = [
+    (datetime(1970, 1, 1), 2, 'Peso Ley 18.188'),
+    (datetime(1983, 6, 1), 4, 'Peso Argentino'),
+    (datetime(1985, 6, 15), 3, 'Austral'),
+    (datetime(1992, 1, 1), 4, 'Peso'),
+]
 
+def get_currency(fecha):
+    for change_date, _, currency in reversed(redenominations):
+        if fecha >= change_date:
+            return currency
+    return 'Peso Moneda Nacional'
+
+def to_current_peso(amount, fecha):
+    """Convierte un monto de la moneda vigente en `fecha` a Pesos actuales
+    (solo quita de ceros, sin inflación)."""
+    for change_date, zeroes, _ in redenominations:
+        if fecha < change_date:
+            amount /= 10 ** zeroes
+    return amount
+
+def from_current_peso(amount, fecha):
+    """Convierte Pesos actuales a la moneda vigente en `fecha` (sin inflación)."""
+    for change_date, zeroes, _ in reversed(redenominations):
+        if fecha < change_date:
+            amount *= 10 ** zeroes
+    return amount
 # ------------------------------
 # Data source functions
 @retry(stop_max_attempt_number=3, wait_fixed=5000)
@@ -706,7 +734,41 @@ def ajustar_precios_por_splits(df, ticker):
     except Exception as e:
         logger.error(f"Error ajustando splits para {ticker}: {e}")
         return df
+def format_arg_amount(amount, decimals=2):
+    if abs(amount) < 1e-6 and amount != 0:
+        formatted_normal = f"{amount:,.12f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        formatted_scientific = f"{amount:.8e}".replace("e", "×10^")
+        return formatted_normal, formatted_scientific
+    formatted_normal = f"{amount:,.{decimals}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return formatted_normal, None
 
+
+def amount_to_words(amount, currency, decimals=2):
+    if abs(amount) < 1e-6 and amount != 0:
+        formatted_normal, _ = format_arg_amount(amount, 12)
+        return f"Valor muy pequeño: {formatted_normal} {currency}"
+
+    entero = int(round(amount))
+    decimales = int(round((amount - entero) * (10 ** decimals)))
+
+    try:
+        word_part = num2words(entero, lang='es').capitalize()
+    except OverflowError:
+        try:
+            word_part = num2words(entero, lang='en').capitalize() + " (en inglés)"
+        except OverflowError:
+            formatted_normal, _ = format_arg_amount(amount, decimals)
+            return f"Valor demasiado grande para expresar en palabras: {formatted_normal} {currency}"
+
+    if decimales > 0:
+        try:
+            decimal_words = num2words(decimales, lang='es').capitalize()
+            return f"{word_part} {currency} con {decimal_words} centavos"
+        except OverflowError:
+            decimal_words = num2words(decimales, lang='en').capitalize() + " (en inglés)"
+            return f"{word_part} {currency} con {decimal_words} centavos"
+
+    return f"{word_part} {currency}"
 def _extrapolar_hasta_hoy(cpi_mensual: pd.DataFrame, meses_promedio: int = 3) -> tuple[pd.DataFrame, pd.Timestamp]:
     """
     Recibe un DataFrame mensual con columna 'CPI_MoM' (tasa mensual, ej. 0.04 = 4%)
@@ -1051,11 +1113,16 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs(["Inflation Calculator", "Argentine Stock
 
 with tab1:
     st.subheader('Calculador de precios por inflación (Argentina)')
-
     value_choice = st.radio(
         "¿Quieres ingresar el valor para la fecha de inicio o la fecha de fin?",
         ('Fecha de Inicio', 'Fecha de Fin'),
         key='value_choice_radio'
+    )
+    incluir_cambios_moneda = st.checkbox(
+        'Tener en cuenta los cambios de moneda históricos '
+        '(Peso Moneda Nacional → Ley 18.188 → Peso Argentino → Austral → Peso)',
+        value=True,
+        key='incluir_cambios_moneda'
     )
 
     if value_choice == 'Fecha de Inicio':
@@ -1080,12 +1147,45 @@ with tab1:
             key='start_value_input'
         )
 
+        start_dt = datetime.combine(start_date, datetime.min.time())
+        moneda_inicio = get_currency(start_dt)
+
         try:
             start_inflation = daily_cpi.loc[pd.to_datetime(start_date)]
             end_inflation = daily_cpi.loc[pd.to_datetime(end_date)]
-            end_value = start_value * (end_inflation / start_inflation)
-            st.write(f"Valor inicial el {start_date}: ARS {start_value}")
-            st.write(f"Valor ajustado el {end_date}: ARS {end_value:.2f}")
+            factor = end_inflation / start_inflation
+            end_value_misma_moneda = start_value * factor
+
+            start_fmt, _ = format_arg_amount(start_value)
+            end_fmt, end_fmt_sci = format_arg_amount(end_value_misma_moneda)
+
+            st.write(f"Valor inicial el {start_date}: {moneda_inicio} {start_fmt}")
+            st.caption(amount_to_words(start_value, moneda_inicio))
+
+            st.write(
+                f"Ajustado por inflación (misma moneda, {moneda_inicio}): {moneda_inicio} {end_fmt}"
+                + (f" ({end_fmt_sci})" if end_fmt_sci else "")
+            )
+            st.caption(amount_to_words(end_value_misma_moneda, moneda_inicio))
+
+            if incluir_cambios_moneda:
+                start_en_pesos_actuales = to_current_peso(start_value, start_dt)
+                end_en_pesos_actuales = start_en_pesos_actuales * factor
+
+                pesos_ini_fmt, pesos_ini_sci = format_arg_amount(start_en_pesos_actuales, 8)
+                pesos_fin_fmt, pesos_fin_sci = format_arg_amount(end_en_pesos_actuales)
+
+                st.write(
+                    f"Equivalente en Pesos actuales, solo por cambio de moneda (sin inflación): ARS {pesos_ini_fmt}"
+                    + (f" ({pesos_ini_sci})" if pesos_ini_sci else "")
+                )
+                st.caption(amount_to_words(start_en_pesos_actuales, 'pesos', 8))
+
+                st.write(
+                    f"Ajustado por inflación y cambio de moneda, en Pesos actuales: ARS {pesos_fin_fmt}"
+                    + (f" ({pesos_fin_sci})" if pesos_fin_sci else "")
+                )
+                st.caption(amount_to_words(end_en_pesos_actuales, 'pesos'))
         except KeyError as e:
             st.error(f"Error al obtener la inflación para las fechas seleccionadas: {e}")
 
@@ -1111,12 +1211,48 @@ with tab1:
             key='end_value_input'
         )
 
+        start_dt = datetime.combine(start_date, datetime.min.time())
+        end_dt = datetime.combine(end_date, datetime.min.time())
+        moneda_inicio = get_currency(start_dt)
+        moneda_fin = get_currency(end_dt)
+
         try:
             start_inflation = daily_cpi.loc[pd.to_datetime(start_date)]
             end_inflation = daily_cpi.loc[pd.to_datetime(end_date)]
-            start_value = end_value / (end_inflation / start_inflation)
-            st.write(f"Valor ajustado el {start_date}: ARS {start_value:.2f}")
-            st.write(f"Valor final el {end_date}: ARS {end_value}")
+            factor = end_inflation / start_inflation
+            start_value_misma_moneda = end_value / factor
+
+            end_fmt, _ = format_arg_amount(end_value)
+            start_fmt, start_fmt_sci = format_arg_amount(start_value_misma_moneda)
+
+            st.write(f"Valor final el {end_date}: {moneda_fin} {end_fmt}")
+            st.caption(amount_to_words(end_value, moneda_fin))
+
+            st.write(
+                f"Deflactado a la fecha de inicio (misma moneda, {moneda_fin}): {moneda_fin} {start_fmt}"
+                + (f" ({start_fmt_sci})" if start_fmt_sci else "")
+            )
+            st.caption(amount_to_words(start_value_misma_moneda, moneda_fin))
+
+            if incluir_cambios_moneda:
+                end_en_pesos_actuales = to_current_peso(end_value, end_dt)
+                start_en_pesos_actuales = end_en_pesos_actuales / factor
+                start_moneda_historica = from_current_peso(start_en_pesos_actuales, start_dt)
+
+                pesos_fin_fmt, pesos_fin_sci = format_arg_amount(end_en_pesos_actuales)
+                hist_fmt, hist_sci = format_arg_amount(start_moneda_historica, 8)
+
+                st.write(
+                    f"Equivalente en Pesos actuales al {end_date}, solo por cambio de moneda: ARS {pesos_fin_fmt}"
+                    + (f" ({pesos_fin_sci})" if pesos_fin_sci else "")
+                )
+                st.caption(amount_to_words(end_en_pesos_actuales, 'pesos'))
+
+                st.write(
+                    f"Deflactado y convertido a la moneda vigente el {start_date} ({moneda_inicio}): "
+                    f"{moneda_inicio} {hist_fmt}" + (f" ({hist_sci})" if hist_sci else "")
+                )
+                st.caption(amount_to_words(start_moneda_historica, moneda_inicio, 8))
         except KeyError as e:
             st.error(f"Error al obtener la inflación para las fechas seleccionadas: {e}")
 
