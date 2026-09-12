@@ -6,3 +6,4 @@ plotly
 curl_cffi
 retrying
 seaborn
+num2words
