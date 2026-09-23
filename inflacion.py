@@ -129,6 +129,7 @@ def graficar_activos_ajustados(
     force_inflation=False,
     plot_end_date=None,
     sma_line_width=1.0,
+    data_line_width=1.5,
 ):
     """
     Descarga, ajusta por inflación y grafica (Plotly + Matplotlib/Seaborn) una lista de tickers.
@@ -227,7 +228,7 @@ def graficar_activos_ajustados(
                     go.Scatter(
                         x=stock_data.index, y=pct_change, mode='lines',
                         name=f'{display_name} (Ajustado, %)',
-                        line=dict(color=color, width=1.5), yaxis='y1',
+                        line=dict(color=color, width=data_line_width), yaxis='y1',
                         hovertemplate='Fecha: %{x|%Y-%m-%d}<br>Variación: %{y:.2f}%<extra></extra>'
                     )
                 )
@@ -236,7 +237,7 @@ def graficar_activos_ajustados(
                     y0=0, y1=0, line=dict(color="rgba(255, 0, 0, 0.5)", width=1, dash="dash"),
                     xref="x", yref="y1"
                 )
-                ax_mpl.plot(stock_data.index, pct_change, color=color, linewidth=1.5, label=f'{display_name} (Ajustado, %)')
+                ax_mpl.plot(stock_data.index, pct_change, color=color, linewidth=data_line_width, label=f'{display_name} (Ajustado, %)')
                 ax_mpl.axhline(0, color='red', linewidth=1, linestyle='--', alpha=0.5)
 
                 if show_nominal_ghost:
@@ -262,7 +263,7 @@ def graficar_activos_ajustados(
                 fig.add_trace(
                     go.Scatter(
                         x=stock_data.index, y=stock_data['Inflation_Adjusted_Close'], mode='lines',
-                        name=f'{display_name} (Ajustado por Inflación)', line=dict(color=color, width=1.5), yaxis='y1',
+                        name=f'{display_name} (Ajustado por Inflación)', line=dict(color=color, width=data_line_width), yaxis='y1',
                         hovertemplate=f'Fecha: %{{x|%Y-%m-%d}}<br>Precio: %{{y:.2f}} {moneda}<extra></extra>'
                     )
                 )
@@ -276,7 +277,7 @@ def graficar_activos_ajustados(
                 )
                 ax_mpl.plot(
                     stock_data.index, stock_data['Inflation_Adjusted_Close'],
-                    color=color, linewidth=1.5, label=f'{display_name} (Ajustado por Inflación)'
+                    color=color, linewidth=data_line_width, label=f'{display_name} (Ajustado por Inflación)'
                 )
                 ax_mpl.axhline(avg_price, color=color, linewidth=0.8, linestyle=':', alpha=0.8)
 
@@ -302,10 +303,6 @@ def graficar_activos_ajustados(
                         line=dict(color='orange', width=sma_line_width), yaxis='y1',
                         hovertemplate=f'Fecha: %{{x|%Y-%m-%d}}<br>SMA: %{{y:.2f}} {moneda}<extra></extra>'
                     )
-                )
-                ax_mpl.plot(
-                    stock_data.index, stock_data['SMA'], color='orange',
-                    linewidth=sma_line_width, label=f'{display_name} SMA (Ajustado)'
                 )
 
             for split in st.session_state.custom_splits:
@@ -1014,8 +1011,14 @@ paleta_seleccionada = st.sidebar.selectbox(
 )
 colors = paletas_disponibles[paleta_seleccionada]
 
+data_line_width = st.sidebar.slider(
+    "Grosor de la línea de datos (precio/variación)",
+    min_value=0.5, max_value=5.0, value=1.5, step=0.5,
+    key="data_line_width",
+)
+
 sma_line_width = st.sidebar.slider(
-    "Grosor de la línea SMA (tendencia)",
+    "Grosor de la línea SMA (solo Plotly)",
     min_value=0.5, max_value=5.0, value=1.5, step=0.5,
     key="sma_line_width",
 )
@@ -1409,6 +1412,7 @@ with tab2:
             force_inflation=force_inflation_arg,
             plot_end_date=plot_end_date,
             sma_line_width=sma_line_width,
+            data_line_width=data_line_width,
         )
 
 with tab3:
@@ -1799,4 +1803,5 @@ with tab5:
             siempre_ajustar=True,
             plot_end_date=plot_end_date_us,
             sma_line_width=sma_line_width,
+            data_line_width=data_line_width,
         )
