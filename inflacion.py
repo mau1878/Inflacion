@@ -391,7 +391,7 @@ splits = {
     'VIST.BA': {'ratio': 3, 'date': datetime(2024, 1, 23)},
     'WMT.BA': {'ratio': 3, 'date': datetime(2024, 1, 23)},
     'AGRO.BA': [
-        {'ratio': 9, 'date': datetime(2023, 11, 2), 'type': 'divide'},
+        {'ratio': 6, 'date': datetime(2023, 11, 2), 'type': 'divide'},
         {'ratio': 2.1, 'date': datetime(2023, 11, 6), 'type': 'multiply'},
     ],
     'ECOG.BA': {'ratio': 10, 'date': datetime(2025, 8, 18)},
