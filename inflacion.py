@@ -128,6 +128,7 @@ def graficar_activos_ajustados(
     siempre_ajustar=False,
     force_inflation=False,
     plot_end_date=None,
+    sma_line_width=1.0,
 ):
     """
     Descarga, ajusta por inflación y grafica (Plotly + Matplotlib/Seaborn) una lista de tickers.
@@ -298,9 +299,13 @@ def graficar_activos_ajustados(
                 fig.add_trace(
                     go.Scatter(
                         x=stock_data.index, y=stock_data['SMA'], mode='lines', name=f'{display_name} SMA (Ajustado)',
-                        line=dict(color='orange', width=1), yaxis='y1',
+                        line=dict(color='orange', width=sma_line_width), yaxis='y1',
                         hovertemplate=f'Fecha: %{{x|%Y-%m-%d}}<br>SMA: %{{y:.2f}} {moneda}<extra></extra>'
                     )
+                )
+                ax_mpl.plot(
+                    stock_data.index, stock_data['SMA'], color='orange',
+                    linewidth=sma_line_width, label=f'{display_name} SMA (Ajustado)'
                 )
 
             for split in st.session_state.custom_splits:
@@ -1009,6 +1014,12 @@ paleta_seleccionada = st.sidebar.selectbox(
 )
 colors = paletas_disponibles[paleta_seleccionada]
 
+sma_line_width = st.sidebar.slider(
+    "Grosor de la línea SMA (tendencia)",
+    min_value=0.5, max_value=5.0, value=1.5, step=0.5,
+    key="sma_line_width",
+)
+
 st.sidebar.subheader("Cargar datos personalizados desde CSV")
 if "uploaded_data" not in st.session_state:
     st.session_state.uploaded_data = {}
@@ -1074,40 +1085,49 @@ st.sidebar.subheader("Eventos Personalizados")
 if "custom_events" not in st.session_state:
     st.session_state.custom_events = []
 
-with st.sidebar.form(key="event_form"):
-    event_ticker = st.text_input(
-        "Ingresa el ticker para el evento (por ejemplo, GLOB.BA):",
-        key="event_ticker_input"
+def _eventos_a_texto(eventos):
+    return "\n".join(
+        f"{e['ticker']},{e['date'].strftime('%Y-%m-%d')},{e['description']}"
+        for e in eventos
     )
-    event_date = st.date_input(
-        "Selecciona la fecha del evento:",
-        min_value=datetime(2000, 1, 1).date(),
-        max_value=datetime.now().date(),
-        key="event_date_input"
-    )
-    event_description = st.text_input(
-        "Ingresa una descripción para el evento (por ejemplo, Ganancias Q4):",
-        key="event_description_input"
-    )
-    submit_event = st.form_submit_button("Agregar Evento")
 
-    if submit_event and event_ticker and event_description:
-        st.session_state.custom_events.append({
-            "ticker": event_ticker.strip().upper(),
-            "date": event_date,
-            "description": event_description
-        })
-        st.sidebar.success(f"Evento agregado: {event_description} en {event_date} para {event_ticker}")
+eventos_texto = st.sidebar.text_area(
+    "Un evento por línea — formato: TICKER,AAAA-MM-DD,Descripción",
+    value=_eventos_a_texto(st.session_state.custom_events),
+    height=150,
+    key="eventos_texto_input",
+    help="Ejemplo:\nGGAL.BA,2024-03-15,Ganancias Q1\nYPFD.BA,2024-06-01,Anuncio dividendo",
+)
+
+if st.sidebar.button("Guardar eventos"):
+    nuevos_eventos, errores = [], []
+    for i, linea in enumerate(eventos_texto.splitlines(), start=1):
+        linea = linea.strip()
+        if not linea:
+            continue
+        partes = linea.split(",", 2)
+        if len(partes) != 3:
+            errores.append(f"Línea {i}: faltan comas (se esperan 3 campos)")
+            continue
+        ticker, fecha_str, descripcion = (p.strip() for p in partes)
+        try:
+            fecha = datetime.strptime(fecha_str, "%Y-%m-%d").date()
+        except ValueError:
+            errores.append(f"Línea {i}: fecha inválida '{fecha_str}' (usar AAAA-MM-DD)")
+            continue
+        if not ticker or not descripcion:
+            errores.append(f"Línea {i}: ticker o descripción vacíos")
+            continue
+        nuevos_eventos.append({"ticker": ticker.upper(), "date": fecha, "description": descripcion})
+
+    st.session_state.custom_events = nuevos_eventos
+    if errores:
+        st.sidebar.error("Algunas líneas no se cargaron:\n" + "\n".join(errores))
+    else:
+        st.sidebar.success(f"{len(nuevos_eventos)} eventos guardados.")
 
 if st.session_state.custom_events:
-    st.sidebar.write("Eventos Personalizados Agregados:")
-    for i, event in enumerate(st.session_state.custom_events):
-        st.sidebar.write(
-            f"Ticker: {event['ticker']}, Evento: {event['description']}, Fecha: {event['date']}"
-        )
-        if st.sidebar.button(f"Eliminar Evento {i+1}", key=f"remove_event_{i}"):
-            st.session_state.custom_events.pop(i)
-            st.sidebar.success("Evento eliminado.")
+    st.sidebar.caption(f"{len(st.session_state.custom_events)} eventos cargados.")
 # Main content in tabs
 tab1, tab2, tab3, tab4, tab5 = st.tabs(["Inflation Calculator", "Argentine Stock Adjuster", "Custom Calculations", "Volatility Analysis", "US Stock Adjuster"])
 
@@ -1388,6 +1408,7 @@ with tab2:
             siempre_ajustar=False,
             force_inflation=force_inflation_arg,
             plot_end_date=plot_end_date,
+            sma_line_width=sma_line_width,
         )
 
 with tab3:
@@ -1777,4 +1798,5 @@ with tab5:
             show_nominal_ghost=show_nominal_ghost_us,
             siempre_ajustar=True,
             plot_end_date=plot_end_date_us,
+            sma_line_width=sma_line_width,
         )
