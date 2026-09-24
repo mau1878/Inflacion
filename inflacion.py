@@ -426,6 +426,8 @@ def graficar_activos_ajustados(
 
     tickers_titulo = ', '.join(tickers) if len(tickers) <= 3 else f"{len(tickers)} tickers"
     titulo_base = f'Precios Históricos Ajustados por Inflación ({moneda}) - {tickers_titulo}'
+    if metodo_cupones == 'retorno_total':
+        titulo_base += ' [Bonos: retorno total, cupones reinvertidos]'
     titulo = titulo_base if not is_percentage_mode else f'{titulo_base} (%)'
     ylabel = f'Precio de Cierre Ajustado ({moneda})' if not is_percentage_mode else 'Variación Porcentual (%)'
 
