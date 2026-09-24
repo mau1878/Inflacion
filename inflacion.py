@@ -370,7 +370,7 @@ def graficar_activos_ajustados(
                             go.Scatter(
                                 x=stock_data.index, y=stock_data['Close_MEP'], mode='lines',
                                 name=f'{display_name} (USD MEP)',
-                                line=dict(color=MEP_GHOST_COLOR, width=1, dash='dashdot'),
+                                line=dict(color=MEP_GHOST_COLOR, width=1.3, dash='dashdot'),
                                 yaxis='y2', opacity=0.75,
                                 hovertemplate='Fecha: %{x|%Y-%m-%d}<br>USD MEP: %{y:.2f}<extra></extra>'
                             )
@@ -379,8 +379,9 @@ def graficar_activos_ajustados(
                             ax_mpl2 = ax_mpl.twinx()
                             ax_mpl2.set_ylabel('Precio en USD (MEP)', color=MEP_GHOST_COLOR)
                             ax_mpl2.tick_params(axis='y', colors=MEP_GHOST_COLOR)
+                            ax_mpl2.grid(True, color=MEP_GHOST_COLOR, alpha=0.15, linewidth=0.7)
                         ax_mpl2.plot(
-                            stock_data.index, stock_data['Close_MEP'], color=MEP_GHOST_COLOR, linewidth=1,
+                            stock_data.index, stock_data['Close_MEP'], color=MEP_GHOST_COLOR, linewidth=1.3,
                             linestyle='-.', alpha=0.75, label=f'{display_name} (USD MEP)'
                         )
 
@@ -442,7 +443,8 @@ def graficar_activos_ajustados(
         fig.update_layout(
             yaxis2=dict(
                 title=dict(text='Precio en USD (MEP)', font=dict(size=14, color='#00CED1')),
-                overlaying='y', side='right', showgrid=False,
+                overlaying='y', side='right', showgrid=True,
+                gridcolor='rgba(0, 206, 209, 0.15)', gridwidth=1,
                 tickformat=',.2f', color='#00CED1',
             )
         )
