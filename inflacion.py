@@ -161,6 +161,7 @@ def graficar_activos_ajustados(
     sma_line_width=1.0,
     data_line_width=1.5,
     show_mep_ghost=False,
+    metodo_cupones='limpio',
 ):
     """
     Descarga, ajusta por inflación y grafica (Plotly + Matplotlib/Seaborn) una lista de tickers.
@@ -211,7 +212,7 @@ def graficar_activos_ajustados(
             stock_data.index = stock_data.index.normalize()
 
             stock_data = ajustar_precios_por_splits(stock_data, ticker)
-            stock_data = ajustar_precios_por_cupones(stock_data, ticker, cashflows_bonos, daily_mep)
+            stock_data = ajustar_precios_por_cupones(stock_data, ticker, cashflows_bonos, daily_mep, metodo=metodo_cupones)
 
             if siempre_ajustar:
                 needs_inflation_adjustment = True
@@ -898,13 +899,24 @@ def _resolver_ticker_bono(ticker, cashflows_df):
     return None
 
 
-def ajustar_precios_por_cupones(df, ticker, cashflows_df, mep_series):
+def ajustar_precios_por_cupones(df, ticker, cashflows_df, mep_series, metodo='limpio'):
     """
-    Ajusta la serie a 'retorno total', simulando que cada cupón cobrado
-    (renta + amortización) se reinvirtió en el mismo bono al precio
-    vigente ese día. Evita que un pago se vea como una caída de precio.
-    Si la clase del bono cobra en USD (Soberanos HD / Bopreales), el
-    cupón se convierte a ARS con el MEP de la fecha de pago.
+    Ajusta la serie por los cupones (renta + amortización) cobrados, en una
+    de dos metodologías:
+
+    - metodo='limpio' (default): "precio limpio" ex-cupón. Escala el PASADO
+      hacia abajo para que empalme con el precio real de hoy (que queda sin
+      tocar). Muestra la evolución del precio de capital, no incluye la
+      plata efectivamente cobrada por cupones.
+
+    - metodo='retorno_total': simula que cada cupón cobrado se reinvirtió en
+      el mismo bono al precio vigente ese día, escalando el FUTURO hacia
+      arriba desde cada pago (como un índice de retorno total con
+      reinversión). Muestra capital + income; termina por encima del precio
+      limpio.
+
+    Si la clase del bono cobra en USD (Soberanos HD / Bopreales), el cupón
+    se convierte a ARS con el MEP de la fecha de pago.
     Si el ticker no matchea ningún bono del CSV, devuelve `df` sin cambios.
     """
     try:
@@ -952,14 +964,18 @@ def ajustar_precios_por_cupones(df, ticker, cashflows_df, mep_series):
             if precio_ref <= 0:
                 continue
 
-            factor.loc[df.index < fecha_ex] *= precio_ref / (precio_ref + monto)
+            if metodo == 'retorno_total':
+                factor.loc[df.index >= fecha_ex] *= (precio_ref + monto) / precio_ref
+            else:
+                factor.loc[df.index < fecha_ex] *= precio_ref / (precio_ref + monto)
             aplicados += 1
 
         df['Close'] = df['Close'] * factor
 
         # Feedback visible para poder diagnosticar si el ajuste se está aplicando
+        etiqueta_metodo = 'retorno total, cupones reinvertidos' if metodo == 'retorno_total' else 'precio limpio'
         mensaje = (
-            f"💰 {ticker} → cupones de **{ticker_csv}** "
+            f"💰 {ticker} → cupones de **{ticker_csv}** ({etiqueta_metodo}) "
             f"({'USD vía MEP' if cobra_en_usd else 'ARS'}): {aplicados} aplicado(s) en el rango mostrado"
         )
         if sin_mep:
@@ -1642,6 +1658,18 @@ with tab2:
         value=False,
         key='show_mep_ghost_arg'
     )
+    retorno_total_cupones_arg = st.checkbox(
+        'Bonos: usar retorno total (cupones reinvertidos) en vez de precio limpio',
+        value=False,
+        key='retorno_total_cupones_arg',
+        help=(
+            'Precio limpio (default, destildado): resta del pasado el valor de los cupones '
+            'por cobrar, para que el precio de hoy quede igual al de mercado. '
+            'Retorno total (tildado): simula reinversión de cada cupón cobrado en el propio '
+            'bono, sumando capital + income; el precio de hoy queda más alto que el de mercado.'
+        )
+    )
+    metodo_cupones_arg = 'retorno_total' if retorno_total_cupones_arg else 'limpio'
 
     # Diccionarios para almacenar datos (for Argentine tab)
     stock_data_dict_nominal_arg = {}
@@ -1665,6 +1693,7 @@ with tab2:
             sma_line_width=sma_line_width,
             data_line_width=data_line_width,
             show_mep_ghost=show_mep_ghost_arg,
+            metodo_cupones=metodo_cupones_arg,
         )
 
 with tab3:
