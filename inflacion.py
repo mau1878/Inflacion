@@ -364,23 +364,24 @@ def graficar_activos_ajustados(
                 if show_mep_ghost and moneda == 'ARS' and daily_mep is not None and not daily_mep.empty:
                     mep_alineado = daily_mep.reindex(stock_data.index).ffill()
                     if mep_alineado.notna().any():
+                        MEP_GHOST_COLOR = '#00CED1'  # turquesa fijo, distinto del color de cada ticker
                         stock_data['Close_MEP'] = stock_data['Close'] / mep_alineado
                         fig.add_trace(
                             go.Scatter(
                                 x=stock_data.index, y=stock_data['Close_MEP'], mode='lines',
                                 name=f'{display_name} (USD MEP)',
-                                line=dict(color=color, width=1, dash='dashdot'),
-                                yaxis='y2', opacity=0.6,
+                                line=dict(color=MEP_GHOST_COLOR, width=1, dash='dashdot'),
+                                yaxis='y2', opacity=0.75,
                                 hovertemplate='Fecha: %{x|%Y-%m-%d}<br>USD MEP: %{y:.2f}<extra></extra>'
                             )
                         )
                         if ax_mpl2 is None:
                             ax_mpl2 = ax_mpl.twinx()
-                            ax_mpl2.set_ylabel('Precio en USD (MEP)', color='white')
-                            ax_mpl2.tick_params(axis='y', colors='white')
+                            ax_mpl2.set_ylabel('Precio en USD (MEP)', color=MEP_GHOST_COLOR)
+                            ax_mpl2.tick_params(axis='y', colors=MEP_GHOST_COLOR)
                         ax_mpl2.plot(
-                            stock_data.index, stock_data['Close_MEP'], color=color, linewidth=1,
-                            linestyle='-.', alpha=0.6, label=f'{display_name} (USD MEP)'
+                            stock_data.index, stock_data['Close_MEP'], color=MEP_GHOST_COLOR, linewidth=1,
+                            linestyle='-.', alpha=0.75, label=f'{display_name} (USD MEP)'
                         )
 
             if i == 0 and len(stock_data) > 0:
@@ -440,9 +441,9 @@ def graficar_activos_ajustados(
     if show_mep_ghost:
         fig.update_layout(
             yaxis2=dict(
-                title=dict(text='Precio en USD (MEP)', font=dict(size=14, color='white')),
+                title=dict(text='Precio en USD (MEP)', font=dict(size=14, color='#00CED1')),
                 overlaying='y', side='right', showgrid=False,
-                tickformat=',.2f', color='white',
+                tickformat=',.2f', color='#00CED1',
             )
         )
 
