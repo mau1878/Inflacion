@@ -84,8 +84,9 @@ plt.rcParams.update({
 })
 
 
-def _finalizar_grafico_mpl(fig, ax, titulo, ylabel_txt, is_percentage, use_log_scale):
-    """Aplica estilo consistente (oscuro, marca de agua, formato de fechas) a un gráfico Matplotlib/Seaborn."""
+def _finalizar_grafico_mpl(fig, ax, titulo, ylabel_txt, is_percentage, use_log_scale, ax2=None):
+    """Aplica estilo consistente (oscuro, marca de agua, formato de fechas) a un gráfico Matplotlib/Seaborn.
+    ax2, si se pasa, es un eje secundario (twinx) cuyas líneas se suman a la leyenda combinada."""
     ax.set_title(titulo, fontsize=15, color='white', pad=12)
     ax.set_xlabel('Fecha', fontsize=11)
     ax.set_ylabel(ylabel_txt, fontsize=11)
@@ -103,12 +104,16 @@ def _finalizar_grafico_mpl(fig, ax, titulo, ylabel_txt, is_percentage, use_log_s
     )
     fig.tight_layout()
     handles, labels = ax.get_legend_handles_labels()
+    if ax2 is not None:
+        handles2, labels2 = ax2.get_legend_handles_labels()
+        handles, labels = handles + handles2, labels + labels2
     if handles:
         ncols = min(len(labels), 3)
         filas_leyenda = -(-len(labels) // ncols)  # redondeo hacia arriba
         espacio_inferior = 0.22 + 0.06 * filas_leyenda
         fig.subplots_adjust(bottom=espacio_inferior)
         ax.legend(
+            handles, labels,
             loc='upper center', bbox_to_anchor=(0.5, -espacio_inferior * 1.35),
             ncol=ncols, fontsize=8
         )
@@ -155,6 +160,7 @@ def graficar_activos_ajustados(
     plot_end_date=None,
     sma_line_width=1.0,
     data_line_width=1.5,
+    show_mep_ghost=False,
 ):
     """
     Descarga, ajusta por inflación y grafica (Plotly + Matplotlib/Seaborn) una lista de tickers.
@@ -163,6 +169,8 @@ def graficar_activos_ajustados(
     force_inflation solo aplica cuando siempre_ajustar=False (pestaña Argentina).
     show_nominal_ghost agrega, por ticker, una línea punteada "fantasma" con el valor nominal
     (sin ajustar por inflación), tanto en modo absoluto como en modo porcentual.
+    show_mep_ghost agrega, por ticker (solo en modo absoluto), una línea "fantasma" con el
+    precio nominal convertido a USD MEP, en un eje Y secundario.
     plot_end_date permite fijar la fecha final del rango (por defecto, la fecha actual /
     el último dato de IPC disponible, igual que antes).
     Devuelve (stock_data_dict_nominal, stock_data_dict_adjusted, ticker_var_map).
@@ -170,6 +178,7 @@ def graficar_activos_ajustados(
     tickers = [ticker.strip().upper() for ticker in tickers_input.split(',')]
     fig = go.Figure()
     fig_mpl, ax_mpl = plt.subplots(figsize=(11, 5.5))
+    ax_mpl2 = None
 
     ticker_var_map = {ticker: ticker.replace('.', '_') for ticker in tickers}
     stock_data_dict_nominal = {}
@@ -352,6 +361,28 @@ def graficar_activos_ajustados(
                         linestyle=':', alpha=0.5, label=f'{display_name} Nominal'
                     )
 
+                if show_mep_ghost and moneda == 'ARS' and daily_mep is not None and not daily_mep.empty:
+                    mep_alineado = daily_mep.reindex(stock_data.index).ffill()
+                    if mep_alineado.notna().any():
+                        stock_data['Close_MEP'] = stock_data['Close'] / mep_alineado
+                        fig.add_trace(
+                            go.Scatter(
+                                x=stock_data.index, y=stock_data['Close_MEP'], mode='lines',
+                                name=f'{display_name} (USD MEP)',
+                                line=dict(color=color, width=1, dash='dashdot'),
+                                yaxis='y2', opacity=0.6,
+                                hovertemplate='Fecha: %{x|%Y-%m-%d}<br>USD MEP: %{y:.2f}<extra></extra>'
+                            )
+                        )
+                        if ax_mpl2 is None:
+                            ax_mpl2 = ax_mpl.twinx()
+                            ax_mpl2.set_ylabel('Precio en USD (MEP)', color='white')
+                            ax_mpl2.tick_params(axis='y', colors='white')
+                        ax_mpl2.plot(
+                            stock_data.index, stock_data['Close_MEP'], color=color, linewidth=1,
+                            linestyle='-.', alpha=0.6, label=f'{display_name} (USD MEP)'
+                        )
+
             if i == 0 and len(stock_data) > 0:
                 stock_data['SMA'] = stock_data['Inflation_Adjusted_Close'].rolling(window=sma_period).mean()
                 fig.add_trace(
@@ -406,10 +437,18 @@ def graficar_activos_ajustados(
         tickformat=',.2f',
         ticksuffix='' if not is_percentage_mode else '%'
     )
+    if show_mep_ghost:
+        fig.update_layout(
+            yaxis2=dict(
+                title=dict(text='Precio en USD (MEP)', font=dict(size=14, color='white')),
+                overlaying='y', side='right', showgrid=False,
+                tickformat=',.2f', color='white',
+            )
+        )
 
     st.plotly_chart(fig, use_container_width=True)
 
-    _finalizar_grafico_mpl(fig_mpl, ax_mpl, titulo, ylabel, is_percentage_mode, use_log_scale)
+    _finalizar_grafico_mpl(fig_mpl, ax_mpl, titulo, ylabel, is_percentage_mode, use_log_scale, ax2=ax_mpl2)
     st.pyplot(fig_mpl)
     plt.close(fig_mpl)
 
@@ -1595,6 +1634,11 @@ with tab2:
         value=False,
         key='show_nominal_ghost_arg'
     )
+    show_mep_ghost_arg = st.checkbox(
+        'Incluir línea fantasma con el precio en USD MEP (eje secundario)',
+        value=False,
+        key='show_mep_ghost_arg'
+    )
 
     # Diccionarios para almacenar datos (for Argentine tab)
     stock_data_dict_nominal_arg = {}
@@ -1617,6 +1661,7 @@ with tab2:
             plot_end_date=plot_end_date,
             sma_line_width=sma_line_width,
             data_line_width=data_line_width,
+            show_mep_ghost=show_mep_ghost_arg,
         )
 
 with tab3:
