@@ -910,7 +910,7 @@ def ajustar_precios_por_cupones(df, ticker, cashflows_df, mep_series):
             if precio_ref <= 0:
                 continue
 
-            factor.loc[df.index < fecha_ex] *= (precio_ref + monto) / precio_ref
+            factor.loc[df.index < fecha_ex] *= precio_ref / (precio_ref + monto)
             aplicados += 1
 
         df['Close'] = df['Close'] * factor
