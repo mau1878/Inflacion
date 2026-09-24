@@ -784,6 +784,7 @@ def cargar_cashflows_bonos():
             df = pd.read_csv(url, parse_dates=['Fecha'])
         except Exception as e:
             logger.warning(f"No se pudo cargar cashflows_bonos.csv ({e}). Ajuste por cupones deshabilitado.")
+            st.sidebar.warning("⚠️ No se pudo cargar cashflows_bonos.csv: el ajuste por cupones de bonos está deshabilitado.")
             return pd.DataFrame()
     return df
 
@@ -849,6 +850,8 @@ def ajustar_precios_por_cupones(df, ticker, cashflows_df, mep_series):
 
         df = df.copy()
         factor = pd.Series(1.0, index=df.index)
+        aplicados = 0
+        sin_mep = 0
 
         for _, pago in pagos.iterrows():
             fecha_pago = pd.Timestamp(pago['Fecha'])
@@ -858,6 +861,7 @@ def ajustar_precios_por_cupones(df, ticker, cashflows_df, mep_series):
             monto = pago['Cashflow']
             if cobra_en_usd:
                 if mep_series is None or mep_series.empty or fecha_pago not in mep_series.index:
+                    sin_mep += 1
                     logger.warning(f"Sin MEP para {fecha_pago.date()}, se omite cupón de {ticker_csv} en esa fecha.")
                     continue
                 monto = monto * mep_series.loc[fecha_pago]
@@ -870,12 +874,24 @@ def ajustar_precios_por_cupones(df, ticker, cashflows_df, mep_series):
                 continue
 
             factor.loc[df.index <= fecha_pago] *= (precio_ref + monto) / precio_ref
+            aplicados += 1
 
         df['Close'] = df['Close'] * factor
+
+        # Feedback visible para poder diagnosticar si el ajuste se está aplicando
+        mensaje = (
+            f"💰 {ticker} → cupones de **{ticker_csv}** "
+            f"({'USD vía MEP' if cobra_en_usd else 'ARS'}): {aplicados} aplicado(s) en el rango mostrado"
+        )
+        if sin_mep:
+            mensaje += f", {sin_mep} sin convertir por falta de MEP en esa fecha"
+        st.caption(mensaje)
+
         return df
 
     except Exception as e:
         logger.error(f"Error ajustando cupones para {ticker}: {e}")
+        st.warning(f"No se pudo ajustar por cupones para {ticker}: {e}")
         return df
 
 
