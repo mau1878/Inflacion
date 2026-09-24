@@ -855,8 +855,16 @@ def ajustar_precios_por_cupones(df, ticker, cashflows_df, mep_series):
 
         for _, pago in pagos.iterrows():
             fecha_pago = pd.Timestamp(pago['Fecha'])
-            if fecha_pago > df.index.max() or fecha_pago < df.index.min():
-                continue
+            if fecha_pago > df.index.max():
+                continue  # el pago todavía no ocurrió dentro del rango mostrado
+
+            # Por liquidación en 24hs, el bono cotiza ex-cupón desde la rueda
+            # ANTERIOR a la fecha de pago del cronograma (no desde la fecha de
+            # pago en sí). Esa rueda es donde realmente cae el precio.
+            dias_previos = df.index[df.index < fecha_pago]
+            if dias_previos.empty:
+                continue  # no hay rueda anterior dentro del rango mostrado
+            fecha_ex = dias_previos.max()
 
             monto = pago['Cashflow']
             if cobra_en_usd:
@@ -866,14 +874,11 @@ def ajustar_precios_por_cupones(df, ticker, cashflows_df, mep_series):
                     continue
                 monto = monto * mep_series.loc[fecha_pago]
 
-            precio_dia = df.loc[df.index <= fecha_pago, 'Close']
-            if precio_dia.empty:
-                continue
-            precio_ref = precio_dia.iloc[-1]
+            precio_ref = df.loc[fecha_ex, 'Close']
             if precio_ref <= 0:
                 continue
 
-            factor.loc[df.index <= fecha_pago] *= (precio_ref + monto) / precio_ref
+            factor.loc[df.index < fecha_ex] *= (precio_ref + monto) / precio_ref
             aplicados += 1
 
         df['Close'] = df['Close'] * factor
