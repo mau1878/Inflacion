@@ -230,6 +230,37 @@ def graficar_activos_ajustados(
             else:
                 stock_data['Inflation_Adjusted_Close'] = stock_data['Close']
 
+            # --- DEBUG temporal: comparar Close vs Inflation_Adjusted_Close
+            # justo antes/después de cada fecha ex-cupón detectada ---
+            ticker_csv_debug = _resolver_ticker_bono(ticker, cashflows_bonos) if not cashflows_bonos.empty else None
+            if ticker_csv_debug is not None:
+                pagos_debug = cashflows_bonos[cashflows_bonos['Bono'] == ticker_csv_debug].sort_values('Fecha')
+                filas_debug = []
+                for _, pago_d in pagos_debug.iterrows():
+                    fecha_pago_d = pd.Timestamp(pago_d['Fecha'])
+                    if fecha_pago_d > stock_data.index.max():
+                        continue
+                    dias_prev_d = stock_data.index[stock_data.index < fecha_pago_d]
+                    if dias_prev_d.empty:
+                        continue
+                    fecha_ex_d = dias_prev_d.max()
+                    dias_prev_ex_d = stock_data.index[stock_data.index < fecha_ex_d]
+                    if dias_prev_ex_d.empty:
+                        continue
+                    fecha_prev_d = dias_prev_ex_d.max()
+                    filas_debug.append({
+                        'fecha_prev': fecha_prev_d.date(),
+                        'Close_prev': stock_data.loc[fecha_prev_d, 'Close'],
+                        'InflAdj_prev': stock_data.loc[fecha_prev_d, 'Inflation_Adjusted_Close'],
+                        'fecha_ex': fecha_ex_d.date(),
+                        'Close_ex': stock_data.loc[fecha_ex_d, 'Close'],
+                        'InflAdj_ex': stock_data.loc[fecha_ex_d, 'Inflation_Adjusted_Close'],
+                    })
+                if filas_debug:
+                    st.caption(f"🔎 DEBUG {ticker}: comparación Close / Inflation_Adjusted_Close alrededor de cada ex-cupón")
+                    st.dataframe(pd.DataFrame(filas_debug))
+            # --- FIN DEBUG temporal ---
+
             if stock_data.empty:
                 st.error(f"No hay datos suficientes para procesar {ticker}.")
                 continue
