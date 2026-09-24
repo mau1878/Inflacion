@@ -849,6 +849,7 @@ def ajustar_precios_por_cupones(df, ticker, cashflows_df, mep_series):
         cobra_en_usd = pagos['Clase'].iloc[0] in CLASES_EN_USD
 
         df = df.copy()
+        precio_inicial_antes = df['Close'].iloc[0]
         factor = pd.Series(1.0, index=df.index)
         aplicados = 0
         sin_mep = 0
@@ -890,6 +891,10 @@ def ajustar_precios_por_cupones(df, ticker, cashflows_df, mep_series):
         )
         if sin_mep:
             mensaje += f", {sin_mep} sin convertir por falta de MEP en esa fecha"
+        mensaje += (
+            f" | factor acumulado máx: {factor.max():.4f} | "
+            f"precio en {df.index.min().date()}: {precio_inicial_antes:,.2f} → {df['Close'].iloc[0]:,.2f}"
+        )
         st.caption(mensaje)
 
         return df
