@@ -114,6 +114,31 @@ def _finalizar_grafico_mpl(fig, ax, titulo, ylabel_txt, is_percentage, use_log_s
         )
 
 
+def add_marker_lines(fig, items, color, y_top, name, dash="dot"):
+    """
+    Dibuja líneas verticales SIN texto fijo (evita el amontonamiento cuando hay
+    muchos eventos/splits cercanos) y agrega un marcador con la info solo al
+    pasar el mouse (hover) sobre el punto, ubicado cerca del techo de la serie.
+    `items` es una lista de tuplas (fecha_datetime, texto_descripcion).
+    """
+    if not items:
+        return
+    for dt, _ in items:
+        fig.add_vline(x=dt.timestamp() * 1000, line=dict(color=color, width=1, dash=dash))
+    fig.add_trace(
+        go.Scatter(
+            x=[dt for dt, _ in items],
+            y=[y_top] * len(items),
+            mode='markers',
+            marker=dict(symbol='triangle-down', size=9, color=color, line=dict(width=1, color='black')),
+            hovertext=[f"{texto}<br>{dt.strftime('%Y-%m-%d')}" for dt, texto in items],
+            hoverinfo='text',
+            name=name,
+            showlegend=False,
+        )
+    )
+
+
 def graficar_activos_ajustados(
     tickers_input,
     sma_period,
@@ -305,25 +330,23 @@ def graficar_activos_ajustados(
                     )
                 )
 
-            for split in st.session_state.custom_splits:
-                if split["ticker"] == ticker:
-                    split_dt = datetime.combine(split["date"], datetime.min.time())
-                    fig.add_vline(
-                        x=split_dt.timestamp() * 1000, line=dict(color="white", width=1, dash="dash"),
-                        annotation_text=f"Split {split['ratio']}:1", annotation_position="top",
-                        annotation=dict(font=dict(color='white'))
-                    )
-                    ax_mpl.axvline(split_dt, color='white', linewidth=1, linestyle='--', alpha=0.7)
+            y_top_ticker = (pct_change.max() if is_percentage_mode else stock_data['Inflation_Adjusted_Close'].max())
 
-            for event in st.session_state.custom_events:
-                if event["ticker"] == ticker:
-                    event_dt = datetime.combine(event["date"], datetime.min.time())
-                    fig.add_vline(
-                        x=event_dt.timestamp() * 1000, line=dict(color="yellow", width=1, dash="dot"),
-                        annotation_text=event["description"], annotation_position="top",
-                        annotation=dict(font=dict(color='yellow'))
-                    )
-                    ax_mpl.axvline(event_dt, color='yellow', linewidth=1, linestyle=':', alpha=0.7)
+            splits_ticker = [
+                (datetime.combine(s["date"], datetime.min.time()), f"Split {s['ratio']}:1")
+                for s in st.session_state.custom_splits if s["ticker"] == ticker
+            ]
+            for dt, _ in splits_ticker:
+                ax_mpl.axvline(dt, color='white', linewidth=1, linestyle='--', alpha=0.7)
+            add_marker_lines(fig, splits_ticker, "white", y_top_ticker, f'{display_name} Splits', dash="dash")
+
+            eventos_ticker = [
+                (datetime.combine(e["date"], datetime.min.time()), e["description"])
+                for e in st.session_state.custom_events if e["ticker"] == ticker
+            ]
+            for dt, _ in eventos_ticker:
+                ax_mpl.axvline(dt, color='yellow', linewidth=1, linestyle=':', alpha=0.7)
+            add_marker_lines(fig, eventos_ticker, "yellow", y_top_ticker, f'{display_name} Eventos')
 
         except Exception as e:
             st.error(f"Error procesando {ticker}: {e}")
@@ -1500,34 +1523,6 @@ with tab3:
                 # ------------------------------------------------------------------
                 fig = go.Figure()
 
-                # ── Eventos personalizados ──
-                if "custom_events" in st.session_state and used_tickers:
-                    for event in st.session_state.custom_events:
-                        if event["ticker"] in used_tickers:
-                            event_date = datetime.combine(event["date"], datetime.min.time())
-                            x_pos = event_date.timestamp() * 1000
-                            fig.add_vline(
-                                x=x_pos,
-                                line=dict(color="yellow", width=1, dash="dot"),
-                                annotation_text=event["description"],
-                                annotation_position="top left",
-                                annotation=dict(font=dict(color="yellow", size=11), bgcolor="rgba(0,0,0,0.6)", borderpad=4)
-                            )
-
-                # ── Splits personalizados (opcional) ──
-                if "custom_splits" in st.session_state and used_tickers:
-                    for split in st.session_state.custom_splits:
-                        if split["ticker"] in used_tickers:
-                            split_date = datetime.combine(split["date"], datetime.min.time())
-                            x_pos = split_date.timestamp() * 1000
-                            fig.add_vline(
-                                x=x_pos,
-                                line=dict(color="white", width=1, dash="dash"),
-                                annotation_text=f"Split {split['ratio']}:1",
-                                annotation_position="top left",
-                                annotation=dict(font=dict(color="white", size=11))
-                            )
-
                 # ── Traza principal ──
                 if show_percentage or show_percentage_from_recent:
                     if show_percentage_from_recent:
@@ -1554,6 +1549,22 @@ with tab3:
                         line=dict(color=colors[-1], width=2),
                         hovertemplate='Fecha: %{x|%Y-%m-%d}<br>Valor: %{y:.2f} ARS<extra></extra>'
                     ))
+
+                # ── Eventos y splits (líneas sin texto fijo, info al pasar el mouse) ──
+                serie_top = custom_series_pct if (show_percentage or show_percentage_from_recent) else adjusted_series
+                y_top_custom = serie_top.max()
+
+                eventos_custom = [
+                    (datetime.combine(e["date"], datetime.min.time()), e["description"])
+                    for e in st.session_state.get("custom_events", []) if e["ticker"] in used_tickers
+                ]
+                add_marker_lines(fig, eventos_custom, "yellow", y_top_custom, "Eventos")
+
+                splits_custom = [
+                    (datetime.combine(s["date"], datetime.min.time()), f"Split {s['ratio']}:1")
+                    for s in st.session_state.get("custom_splits", []) if s["ticker"] in used_tickers
+                ]
+                add_marker_lines(fig, splits_custom, "white", y_top_custom, "Splits", dash="dash")
 
                 # ── Título (personalizado o automático) ──
                 if custom_title.strip():
@@ -1682,15 +1693,14 @@ with tab4:
                     )
                 )
 
-                for split in st.session_state.custom_splits:
-                    if split["ticker"] == ticker:
-                        fig_vol.add_vline(
-                            x=datetime.combine(split["date"], datetime.min.time()).timestamp() * 1000,
-                            line=dict(color="white", width=1, dash="dash"),
-                            annotation_text=f"Split {split['ratio']}:1",
-                            annotation_position="top",
-                            annotation=dict(font=dict(color='white'))
-                        )
+                splits_vol = [
+                    (datetime.combine(s["date"], datetime.min.time()), f"Split {s['ratio']}:1")
+                    for s in st.session_state.custom_splits if s["ticker"] == ticker
+                ]
+                add_marker_lines(
+                    fig_vol, splits_vol, "white",
+                    stock_data['Inflation_Adjusted_Close'].max(), f'{display_name} Splits', dash="dash"
+                )
 
                 fig_vol.add_annotation(
                     text="MTaurus - X: mtaurus_ok",
