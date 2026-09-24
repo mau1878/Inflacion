@@ -202,6 +202,7 @@ def graficar_activos_ajustados(
             stock_data.index = stock_data.index.normalize()
 
             stock_data = ajustar_precios_por_splits(stock_data, ticker)
+            stock_data = ajustar_precios_por_cupones(stock_data, ticker, cashflows_bonos, daily_mep)
 
             if siempre_ajustar:
                 needs_inflation_adjustment = True
@@ -759,6 +760,125 @@ def ajustar_precios_por_splits(df, ticker):
     except Exception as e:
         logger.error(f"Error ajustando splits para {ticker}: {e}")
         return df
+
+
+# ------------------------------------------------------------------
+# Ajuste por cupones cobrados (renta + amortización) de bonos
+# ------------------------------------------------------------------
+CLASES_EN_USD = {"Soberanos HD", "Bopreales"}
+
+
+@st.cache_data(ttl=86400)
+def cargar_cashflows_bonos():
+    """
+    Carga el cronograma de pagos de bonos (columnas esperadas: Bono, Fecha,
+    Cashflow, Clase). Cashflow es el monto pagado por cada 100 de VN, ya en
+    la moneda que corresponda según la Clase (USD para 'Soberanos HD' y
+    'Bopreales'; ARS para el resto).
+    """
+    try:
+        df = pd.read_csv('cashflows_bonos.csv', parse_dates=['Fecha'])
+    except Exception:
+        try:
+            url = "https://raw.githubusercontent.com/mau1878/Inflacion/refs/heads/main/cashflows_bonos.csv"
+            df = pd.read_csv(url, parse_dates=['Fecha'])
+        except Exception as e:
+            logger.warning(f"No se pudo cargar cashflows_bonos.csv ({e}). Ajuste por cupones deshabilitado.")
+            return pd.DataFrame()
+    return df
+
+
+@st.cache_data(ttl=86400)
+def load_mep_data():
+    """
+    Serie diaria del dólar MEP (Bolsa), vía ArgentinaDatos/DolarApi.
+    Se usa 'venta' como proxy del tipo de cambio de conversión de un cupón
+    cobrado en USD; los días sin rueda (fines de semana/feriados) se
+    completan con el último valor conocido.
+    """
+    try:
+        response = requests.get("https://api.argentinadatos.com/v1/cotizaciones/dolares/bolsa", timeout=15)
+        response.raise_for_status()
+        mep = pd.DataFrame(response.json())
+        mep["fecha"] = pd.to_datetime(mep["fecha"])
+        mep = mep.rename(columns={"venta": "MEP"})[["fecha", "MEP"]].set_index("fecha").sort_index()
+        rango_completo = pd.date_range(mep.index.min(), datetime.now().date(), freq="D")
+        mep = mep.reindex(rango_completo).ffill()
+        return mep["MEP"]
+    except Exception as e:
+        logger.error(f"Error obteniendo MEP histórico: {e}")
+        return pd.Series(dtype=float)
+
+
+def _resolver_ticker_bono(ticker, cashflows_df):
+    """Normaliza el ticker ingresado (ej. 'AL30', 'AL30.BA') contra el
+    ticker usado en el CSV de cashflows (ej. 'AL30D')."""
+    base = ticker.upper().replace('.BA', '')
+    tickers_csv = set(cashflows_df['Bono'].unique())
+    if base in tickers_csv:
+        return base
+    if f"{base}D" in tickers_csv:
+        return f"{base}D"
+    if base.endswith('D') and base[:-1] in tickers_csv:
+        return base[:-1]
+    return None
+
+
+def ajustar_precios_por_cupones(df, ticker, cashflows_df, mep_series):
+    """
+    Ajusta la serie a 'retorno total', simulando que cada cupón cobrado
+    (renta + amortización) se reinvirtió en el mismo bono al precio
+    vigente ese día. Evita que un pago se vea como una caída de precio.
+    Si la clase del bono cobra en USD (Soberanos HD / Bopreales), el
+    cupón se convierte a ARS con el MEP de la fecha de pago.
+    Si el ticker no matchea ningún bono del CSV, devuelve `df` sin cambios.
+    """
+    try:
+        if df.empty or cashflows_df is None or cashflows_df.empty:
+            return df
+
+        ticker_csv = _resolver_ticker_bono(ticker, cashflows_df)
+        if ticker_csv is None:
+            return df
+
+        pagos = cashflows_df[cashflows_df['Bono'] == ticker_csv].sort_values('Fecha')
+        if pagos.empty:
+            return df
+
+        cobra_en_usd = pagos['Clase'].iloc[0] in CLASES_EN_USD
+
+        df = df.copy()
+        factor = pd.Series(1.0, index=df.index)
+
+        for _, pago in pagos.iterrows():
+            fecha_pago = pd.Timestamp(pago['Fecha'])
+            if fecha_pago > df.index.max() or fecha_pago < df.index.min():
+                continue
+
+            monto = pago['Cashflow']
+            if cobra_en_usd:
+                if mep_series is None or mep_series.empty or fecha_pago not in mep_series.index:
+                    logger.warning(f"Sin MEP para {fecha_pago.date()}, se omite cupón de {ticker_csv} en esa fecha.")
+                    continue
+                monto = monto * mep_series.loc[fecha_pago]
+
+            precio_dia = df.loc[df.index <= fecha_pago, 'Close']
+            if precio_dia.empty:
+                continue
+            precio_ref = precio_dia.iloc[-1]
+            if precio_ref <= 0:
+                continue
+
+            factor.loc[df.index <= fecha_pago] *= (precio_ref + monto) / precio_ref
+
+        df['Close'] = df['Close'] * factor
+        return df
+
+    except Exception as e:
+        logger.error(f"Error ajustando cupones para {ticker}: {e}")
+        return df
+
+
 def format_arg_amount(amount, decimals=2):
     if abs(amount) < 1e-6 and amount != 0:
         formatted_normal = f"{amount:,.12f}".replace(",", "X").replace(".", ",").replace("X", ".")
@@ -995,6 +1115,10 @@ def mostrar_avisos_extrapolacion():
 daily_cpi = load_cpi_data()
 daily_us_cpi = load_us_cpi_data()
 mostrar_avisos_extrapolacion()
+
+# Load bond cashflows + MEP (para ajuste por cupones cobrados)
+cashflows_bonos = cargar_cashflows_bonos()
+daily_mep = load_mep_data()
 
 # ------------------------------
 # Streamlit UI
@@ -1647,6 +1771,7 @@ with tab4:
             if not stock_data.empty:
                 stock_data.index = pd.to_datetime(stock_data.index).tz_localize(None)
                 stock_data = ajustar_precios_por_splits(stock_data, ticker)
+                stock_data = ajustar_precios_por_cupones(stock_data, ticker, cashflows_bonos, daily_mep)
 
                 if ticker.endswith('.BA'):
                     stock_data = stock_data.join(daily_cpi, how='left')
