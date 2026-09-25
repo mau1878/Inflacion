@@ -162,6 +162,8 @@ def graficar_activos_ajustados(
     data_line_width=1.5,
     show_mep_ghost=False,
     metodo_cupones='limpio',
+    daily_us_cpi_serie=None,
+    mep_en_terminos_reales=False,
 ):
     """
     Descarga, ajusta por inflación y grafica (Plotly + Matplotlib/Seaborn) una lista de tickers.
@@ -367,24 +369,34 @@ def graficar_activos_ajustados(
                     if mep_alineado.notna().any():
                         MEP_GHOST_COLOR = '#00CED1'  # turquesa fijo, distinto del color de cada ticker
                         stock_data['Close_MEP'] = stock_data['Close'] / mep_alineado
+
+                        etiqueta_mep = 'USD MEP'
+                        if mep_en_terminos_reales and daily_us_cpi_serie is not None and not daily_us_cpi_serie.empty:
+                            us_cpi_alineado = daily_us_cpi_serie.reindex(stock_data.index).ffill().bfill()
+                            if us_cpi_alineado.notna().any():
+                                last_us_cpi = us_cpi_alineado.iloc[-1]
+                                stock_data['Close_MEP'] = stock_data['Close_MEP'] * (last_us_cpi / us_cpi_alineado)
+                                etiqueta_mep = 'USD MEP real'
+
                         fig.add_trace(
                             go.Scatter(
                                 x=stock_data.index, y=stock_data['Close_MEP'], mode='lines',
-                                name=f'{display_name} (USD MEP)',
+                                name=f'{display_name} ({etiqueta_mep})',
                                 line=dict(color=MEP_GHOST_COLOR, width=1.3, dash='dashdot'),
                                 yaxis='y2', opacity=0.75,
-                                hovertemplate='Fecha: %{x|%Y-%m-%d}<br>USD MEP: %{y:.2f}<extra></extra>'
+                                hovertemplate=f'Fecha: %{{x|%Y-%m-%d}}<br>{etiqueta_mep}: %{{y:.2f}}<extra></extra>'
                             )
                         )
                         if ax_mpl2 is None:
                             ax_mpl2 = ax_mpl.twinx()
-                            ax_mpl2.set_ylabel('Precio en USD (MEP)', color=MEP_GHOST_COLOR)
+                            ax_mpl2.set_ylabel(f'Precio en {etiqueta_mep}', color=MEP_GHOST_COLOR)
                             ax_mpl2.tick_params(axis='y', colors=MEP_GHOST_COLOR)
                             ax_mpl2.grid(True, color=MEP_GHOST_COLOR, alpha=0.15, linewidth=0.7)
                         ax_mpl2.plot(
                             stock_data.index, stock_data['Close_MEP'], color=MEP_GHOST_COLOR, linewidth=1.3,
-                            linestyle='-.', alpha=0.75, label=f'{display_name} (USD MEP)'
+                            linestyle='-.', alpha=0.75, label=f'{display_name} ({etiqueta_mep})'
                         )
+
 
             if i == 0 and len(stock_data) > 0:
                 stock_data['SMA'] = stock_data['Inflation_Adjusted_Close'].rolling(window=sma_period).mean()
@@ -443,9 +455,10 @@ def graficar_activos_ajustados(
         ticksuffix='' if not is_percentage_mode else '%'
     )
     if show_mep_ghost:
+        titulo_eje_mep = 'Precio en USD MEP real' if (mep_en_terminos_reales and daily_us_cpi_serie is not None) else 'Precio en USD (MEP)'
         fig.update_layout(
             yaxis2=dict(
-                title=dict(text='Precio en USD (MEP)', font=dict(size=14, color='#00CED1')),
+                title=dict(text=titulo_eje_mep, font=dict(size=14, color='#00CED1')),
                 overlaying='y', side='right', showgrid=True,
                 gridcolor='rgba(0, 206, 209, 0.15)', gridwidth=1,
                 tickformat=',.2f', color='#00CED1',
@@ -1672,6 +1685,12 @@ with tab2:
         )
     )
     metodo_cupones_arg = 'retorno_total' if retorno_total_cupones_arg else 'limpio'
+    mep_real_arg = st.checkbox(
+        'Deflactar la línea de USD MEP por inflación de EE.UU. (dólares reales)',
+        value=False,
+        key='mep_real_arg',
+        help='Solo tiene efecto si está tildada "Incluir línea fantasma con el precio en USD MEP".'
+    )
 
     # Diccionarios para almacenar datos (for Argentine tab)
     stock_data_dict_nominal_arg = {}
@@ -1696,6 +1715,8 @@ with tab2:
             data_line_width=data_line_width,
             show_mep_ghost=show_mep_ghost_arg,
             metodo_cupones=metodo_cupones_arg,
+            daily_us_cpi_serie=daily_us_cpi,
+            mep_en_terminos_reales=mep_real_arg,
         )
 
 with tab3:
