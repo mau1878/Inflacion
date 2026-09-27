@@ -113,11 +113,20 @@ def _finalizar_grafico_mpl(fig, ax, titulo, ylabel_txt, is_percentage, use_log_s
 
     nota_lineas = []
     if nota_pie:
+        # Ancho de wrap calculado a partir del ancho real de la figura (en pulgadas), no un
+        # número de caracteres fijo — así el texto usa casi todo el ancho disponible en vez de
+        # quedar en una columna angosta con aire desperdiciado a los costados, y de paso ocupa
+        # menos líneas (achica el alto reservado para la nota).
+        FONT_SIZE_NOTA = 7.5
+        ANCHO_CHAR_APROX_IN = FONT_SIZE_NOTA / 72 * 0.52  # ancho promedio de un carácter, en pulgadas
+        ancho_disponible_in = fig.get_size_inches()[0] * 0.95  # ~5% de margen a cada lado
+        ancho_wrap = max(60, int(ancho_disponible_in / ANCHO_CHAR_APROX_IN))
+
         notas_individuales = nota_pie if isinstance(nota_pie, (list, tuple)) else [nota_pie]
         for idx_nota, texto_nota in enumerate(notas_individuales):
             if idx_nota > 0:
                 nota_lineas.append("")  # línea en blanco entre aclaraciones
-            nota_lineas.extend(textwrap.wrap(texto_nota, width=100))
+            nota_lineas.extend(textwrap.wrap(texto_nota, width=ancho_wrap))
 
     # Posicionamiento en fracción de FIGURA (no de ejes), apilando de arriba hacia abajo:
     # [ zona de fechas rotadas + "Fecha" ] -> [ leyenda ] -> [ notas ].
