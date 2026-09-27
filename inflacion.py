@@ -294,25 +294,56 @@ def graficar_mep_vs_ccl(
     ))
 
     titulo = f'MEP vs. CCL {"(dólares reales)" if en_terminos_reales else ""}'.strip()
+    # plot_style ya trae su propia 'yaxis2' (pensada para % en formato 0-1, ".2%"); acá la
+    # brecha ya viene multiplicada por 100, así que la mezclamos en vez de pasarla dos veces
+    # (eso es lo que tiraba el TypeError: yaxis2 repetido entre el kwarg explícito y **plot_style).
+    yaxis2_style = {
+        **plot_style.get('yaxis2', {}),
+        'title': dict(text='Brecha CCL/MEP (%)', font=dict(size=14, color='#FF6B6B')),
+        'overlaying': 'y', 'side': 'right', 'showgrid': False,
+        'tickformat': '.2f', 'ticksuffix': '%', 'color': '#FF6B6B',
+    }
+    plot_style_resto = {k: v for k, v in plot_style.items() if k != 'yaxis2'}
     fig.update_layout(
         title=dict(text=titulo, font=dict(size=20, color='white')),
         xaxis_title=dict(text='Fecha', font=dict(size=14, color='white')),
         yaxis_title=dict(text=f'ARS por {etiqueta}', font=dict(size=14, color='white')),
-        yaxis2=dict(
-            title=dict(text='Brecha CCL/MEP (%)', font=dict(size=14, color='#FF6B6B')),
-            overlaying='y', side='right', showgrid=False,
-            ticksuffix='%', color='#FF6B6B',
-        ),
-        **plot_style
+        yaxis2=yaxis2_style,
+        **plot_style_resto
     )
     st.plotly_chart(fig, use_container_width=True)
-    st.caption(
-        "ℹ️ MEP y CCL están en la misma unidad (pesos por dólar), así que compararlos "
+
+    nota_mep_ccl = (
+        "MEP y CCL están en la misma unidad (pesos por dólar), así que compararlos "
         "directamente en un eje es válido — no es el mismo caso que comparar un ticker "
         "en pesos contra el dólar. La brecha (línea punteada, eje derecho) es la prima "
         "porcentual del CCL sobre el MEP: cuanto más alta, más caro sale sacar los dólares "
         "del sistema financiero argentino en vez de quedarse con ellos acá adentro."
     )
+    st.caption(f"ℹ️ {nota_mep_ccl}")
+
+    # --- Versión Matplotlib (para que la nota y el gráfico queden embebidos si se descarga
+    # o copia la imagen, igual que en graficar_activos_ajustados) ---
+    fig_mpl, ax_mpl = plt.subplots(figsize=(11, 5.5))
+    ax_mpl.plot(rango, mep, color='#00CED1', linewidth=1.6, label=f'MEP (ARS por {etiqueta})')
+    ax_mpl.plot(rango, ccl, color='#FFA500', linewidth=1.6, label=f'CCL (ARS por {etiqueta})')
+
+    ax_mpl2 = ax_mpl.twinx()
+    ax_mpl2.plot(
+        rango, brecha, color='#FF6B6B', linewidth=1.2, linestyle=':', alpha=0.85,
+        label='Brecha CCL/MEP (%)'
+    )
+    ax_mpl2.set_ylabel('Brecha CCL/MEP (%)', color='#FF6B6B')
+    ax_mpl2.tick_params(axis='y', colors='#FF6B6B')
+    ax_mpl2.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f'{x:.1f}%'))
+    ax_mpl2.grid(False)
+
+    _finalizar_grafico_mpl(
+        fig_mpl, ax_mpl, titulo, f'ARS por {etiqueta}', False, False,
+        ax2=ax_mpl2, nota_pie=[nota_mep_ccl]
+    )
+    st.pyplot(fig_mpl)
+    plt.close(fig_mpl)
 
 
 def add_marker_lines(fig, items, color, y_top, name, dash="dot"):
