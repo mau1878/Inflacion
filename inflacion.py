@@ -159,17 +159,19 @@ def _construir_notas_aclaratorias(
     show_percentage_from_recent,
     show_nominal_ghost,
     algun_ticker_ajustado,
-    show_mep_ghost,
+    show_usd_ghost,
     moneda,
-    mep_disponible,
-    mep_ghost_modo,
+    ref_disponible,
+    usd_ghost_modo,
+    usd_ghost_referencia='MEP',
 ):
     """Arma la lista de aclaraciones pertinentes a la combinación de modos activa en el
-    gráfico (porcentual/absoluto, desde inicio/desde reciente, ghost nominal, ghost MEP y
-    su submodo). Cada nota es independiente y solo se agrega si la combinación la amerita,
-    evitando tanto huecos (modos sin ninguna aclaración) como redundancia entre notas.
-    Devuelve una lista de tuplas (emoji, texto)."""
+    gráfico (porcentual/absoluto, desde inicio/desde reciente, ghost nominal, ghost de
+    dólar MEP o CCL y su submodo). Cada nota es independiente y solo se agrega si la
+    combinación la amerita, evitando tanto huecos (modos sin ninguna aclaración) como
+    redundancia entre notas. Devuelve una lista de tuplas (emoji, texto)."""
     notas = []
+    etiqueta_ref = f'USD {usd_ghost_referencia}'
 
     if is_percentage_mode:
         if show_nominal_ghost and algun_ticker_ajustado:
@@ -193,12 +195,13 @@ def _construir_notas_aclaratorias(
                 "retorno acumulado desde esa fecha hasta hoy, calculado \"hacia atrás\" (no es "
                 "una serie que arranca en el inicio)."
             ))
-        if show_mep_ghost and moneda == 'ARS' and mep_disponible:
+        if show_usd_ghost and moneda == 'ARS' and ref_disponible:
             notas.append((
                 "ℹ️",
-                "La brecha entre la línea en ARS reales y la línea en USD MEP reales es la "
-                "ganancia/pérdida real en dólares MEP por encima (o por debajo) del ajuste por "
-                "inflación argentina — no son dos mediciones del mismo concepto."
+                f"La brecha entre la línea en ARS reales y la línea en {etiqueta_ref} reales es "
+                f"la ganancia/pérdida real en dólares {usd_ghost_referencia} por encima (o por "
+                "debajo) del ajuste por inflación argentina — no son dos mediciones del mismo "
+                "concepto."
             ))
     else:
         if show_nominal_ghost and algun_ticker_ajustado:
@@ -215,25 +218,101 @@ def _construir_notas_aclaratorias(
                 "en poder adquisitivo de la fecha más reciente del gráfico, no el precio "
                 "nominal de mercado de cada día."
             ))
-        if show_mep_ghost and moneda == 'ARS' and mep_disponible:
-            if mep_ghost_modo == 'rebasado':
+        if show_usd_ghost and moneda == 'ARS' and ref_disponible:
+            if usd_ghost_modo == 'rebasado':
                 notas.append((
                     "ℹ️",
-                    "La línea de USD MEP arranca en el mismo valor que el precio ajustado del "
-                    "ticker en la fecha de inicio y comparte el mismo eje. La brecha que se "
-                    "abre a partir de ahí es la ganancia/pérdida real en dólares MEP — no "
-                    "representa el precio real en USD."
+                    f"La línea de {etiqueta_ref} arranca en el mismo valor que el precio "
+                    "ajustado del ticker en la fecha de inicio y comparte el mismo eje. La "
+                    f"brecha que se abre a partir de ahí es la ganancia/pérdida real en dólares "
+                    f"{usd_ghost_referencia} — no representa el precio real en USD."
                 ))
             else:
                 notas.append((
                     "⚠️",
-                    "La línea de USD MEP usa un eje derecho independiente, con su propia escala "
-                    "automática. Un cruce o acercamiento entre las líneas no implica igualdad de "
-                    "valor: para comparar rendimientos relativos, usá la opción \"Rebasado al "
-                    "precio inicial\"."
+                    f"La línea de {etiqueta_ref} usa un eje derecho independiente, con su "
+                    "propia escala automática. Un cruce o acercamiento entre las líneas no "
+                    "implica igualdad de valor: para comparar rendimientos relativos, usá la "
+                    "opción \"Rebasado al precio inicial\"."
                 ))
 
     return notas
+
+
+def graficar_mep_vs_ccl(
+    daily_mep_serie,
+    daily_ccl_serie,
+    plot_start_date,
+    plot_end_date,
+    en_terminos_reales=False,
+    daily_us_cpi_serie=None,
+):
+    """
+    Grafica MEP y CCL directamente entre sí (Plotly), sin pasar por ningún ticker.
+    A diferencia del ghost de USD sobre un ticker, acá ambas series están en la MISMA
+    unidad (pesos por dólar), así que compararlas en un único eje es directamente válido
+    -- no hace falta rebasar ni usar un eje secundario. También calcula y muestra la
+    brecha CCL/MEP (%), el indicador que habitualmente se sigue en medios financieros.
+    """
+    if daily_mep_serie is None or daily_mep_serie.empty or daily_ccl_serie is None or daily_ccl_serie.empty:
+        st.warning("No hay datos suficientes de MEP y/o CCL para graficar la comparación.")
+        return
+
+    inicio = pd.Timestamp(plot_start_date)
+    fin = pd.Timestamp(plot_end_date)
+    rango = pd.date_range(inicio, fin, freq='D')
+
+    mep = daily_mep_serie.reindex(rango).ffill()
+    ccl = daily_ccl_serie.reindex(rango).ffill()
+
+    etiqueta = 'USD (reales)' if en_terminos_reales else 'USD'
+    if en_terminos_reales and daily_us_cpi_serie is not None and not daily_us_cpi_serie.empty:
+        us_cpi_alineado = daily_us_cpi_serie.reindex(rango).ffill().bfill()
+        if us_cpi_alineado.notna().any():
+            last_us_cpi = us_cpi_alineado.iloc[-1]
+            mep = mep * (last_us_cpi / us_cpi_alineado)
+            ccl = ccl * (last_us_cpi / us_cpi_alineado)
+
+    brecha = (ccl / mep - 1) * 100
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=rango, y=mep, mode='lines', name=f'MEP (ARS por {etiqueta})',
+        line=dict(color='#00CED1', width=1.6),
+        hovertemplate='Fecha: %{x|%Y-%m-%d}<br>MEP: %{y:.2f}<extra></extra>'
+    ))
+    fig.add_trace(go.Scatter(
+        x=rango, y=ccl, mode='lines', name=f'CCL (ARS por {etiqueta})',
+        line=dict(color='#FFA500', width=1.6),
+        hovertemplate='Fecha: %{x|%Y-%m-%d}<br>CCL: %{y:.2f}<extra></extra>'
+    ))
+    fig.add_trace(go.Scatter(
+        x=rango, y=brecha, mode='lines', name='Brecha CCL/MEP (%)',
+        line=dict(color='#FF6B6B', width=1.2, dash='dot'),
+        yaxis='y2', opacity=0.8,
+        hovertemplate='Fecha: %{x|%Y-%m-%d}<br>Brecha: %{y:.2f}%<extra></extra>'
+    ))
+
+    titulo = f'MEP vs. CCL {"(dólares reales)" if en_terminos_reales else ""}'.strip()
+    fig.update_layout(
+        title=dict(text=titulo, font=dict(size=20, color='white')),
+        xaxis_title=dict(text='Fecha', font=dict(size=14, color='white')),
+        yaxis_title=dict(text=f'ARS por {etiqueta}', font=dict(size=14, color='white')),
+        yaxis2=dict(
+            title=dict(text='Brecha CCL/MEP (%)', font=dict(size=14, color='#FF6B6B')),
+            overlaying='y', side='right', showgrid=False,
+            ticksuffix='%', color='#FF6B6B',
+        ),
+        **plot_style
+    )
+    st.plotly_chart(fig, use_container_width=True)
+    st.caption(
+        "ℹ️ MEP y CCL están en la misma unidad (pesos por dólar), así que compararlos "
+        "directamente en un eje es válido — no es el mismo caso que comparar un ticker "
+        "en pesos contra el dólar. La brecha (línea punteada, eje derecho) es la prima "
+        "porcentual del CCL sobre el MEP: cuanto más alta, más caro sale sacar los dólares "
+        "del sistema financiero argentino en vez de quedarse con ellos acá adentro."
+    )
 
 
 def add_marker_lines(fig, items, color, y_top, name, dash="dot"):
@@ -277,11 +356,12 @@ def graficar_activos_ajustados(
     plot_end_date=None,
     sma_line_width=1.0,
     data_line_width=1.5,
-    show_mep_ghost=False,
+    show_usd_ghost=False,
     metodo_cupones='limpio',
     daily_us_cpi_serie=None,
-    mep_en_terminos_reales=False,
-    mep_ghost_modo='absoluto',
+    usd_en_terminos_reales=False,
+    usd_ghost_modo='absoluto',
+    usd_ghost_referencia='MEP',
 ):
     """
     Descarga, ajusta por inflación y grafica (Plotly + Matplotlib/Seaborn) una lista de tickers.
@@ -290,16 +370,17 @@ def graficar_activos_ajustados(
     force_inflation solo aplica cuando siempre_ajustar=False (pestaña Argentina).
     show_nominal_ghost agrega, por ticker, una línea punteada "fantasma" con el valor nominal
     (sin ajustar por inflación), tanto en modo absoluto como en modo porcentual.
-    show_mep_ghost agrega, por ticker, una línea "fantasma" con el precio convertido a USD MEP.
+    show_usd_ghost agrega, por ticker, una línea "fantasma" con el precio convertido a USD,
+    según el dólar elegido en usd_ghost_referencia ('MEP' o 'CCL').
     En modo porcentual siempre se expresa como variación % en el mismo eje que el ticker.
-    En modo absoluto, mep_ghost_modo decide cómo se muestra:
-      - 'absoluto': precio en USD MEP tal cual, en un eje Y secundario independiente
+    En modo absoluto, usd_ghost_modo decide cómo se muestra:
+      - 'absoluto': precio en USD tal cual, en un eje Y secundario independiente
         (ojo: al autoescalarse cada eje por separado, un cruce entre líneas no implica
         igualdad de valor real).
-      - 'rebasado': la serie MEP se reescala para arrancar en el mismo valor que el precio
+      - 'rebasado': la serie en USD se reescala para arrancar en el mismo valor que el precio
         ajustado del ticker en la primera fecha visible, y se grafica en el MISMO eje (y1).
         Así, la distancia/pendiente entre ambas líneas sí es interpretable económicamente:
-        muestra si el activo le ganó o le perdió al dólar MEP desde el inicio del período.
+        muestra si el activo le ganó o le perdió al dólar elegido desde el inicio del período.
     plot_end_date permite fijar la fecha final del rango (por defecto, la fecha actual /
     el último dato de IPC disponible, igual que antes).
     Devuelve (stock_data_dict_nominal, stock_data_dict_adjusted, ticker_var_map).
@@ -308,6 +389,12 @@ def graficar_activos_ajustados(
     fig = go.Figure()
     fig_mpl, ax_mpl = plt.subplots(figsize=(11, 5.5))
     ax_mpl2 = None
+
+    # Serie/etiqueta/color de la referencia de dólar elegida para el ghost (MEP o CCL).
+    # Se resuelve una sola vez acá y se reutiliza en los dos bloques (modo % y modo absoluto)
+    # y en el título del eje secundario, para no repetir la lógica de selección.
+    daily_usd_ref = daily_mep if usd_ghost_referencia == 'MEP' else daily_ccl
+    USD_GHOST_COLOR = '#00CED1' if usd_ghost_referencia == 'MEP' else '#FFA500'  # turquesa / naranja
 
     ticker_var_map = {ticker: ticker.replace('.', '_') for ticker in tickers}
     stock_data_dict_nominal = {}
@@ -459,38 +546,37 @@ def graficar_activos_ajustados(
                         linestyle=':', alpha=0.55, label=f'{display_name} Nominal (%)'
                     )
 
-                if show_mep_ghost and moneda == 'ARS' and daily_mep is not None and not daily_mep.empty:
-                    mep_alineado_pct = daily_mep.reindex(stock_data.index).ffill()
-                    if mep_alineado_pct.notna().any():
-                        MEP_GHOST_COLOR = '#00CED1'
-                        close_mep_pct = stock_data['Close'] / mep_alineado_pct
-                        etiqueta_mep_pct = 'USD MEP'
-                        if mep_en_terminos_reales and daily_us_cpi_serie is not None and not daily_us_cpi_serie.empty:
+                if show_usd_ghost and moneda == 'ARS' and daily_usd_ref is not None and not daily_usd_ref.empty:
+                    ref_alineada_pct = daily_usd_ref.reindex(stock_data.index).ffill()
+                    if ref_alineada_pct.notna().any():
+                        close_ref_pct = stock_data['Close'] / ref_alineada_pct
+                        etiqueta_ref_pct = f'USD {usd_ghost_referencia}'
+                        if usd_en_terminos_reales and daily_us_cpi_serie is not None and not daily_us_cpi_serie.empty:
                             us_cpi_alineado_pct = daily_us_cpi_serie.reindex(stock_data.index).ffill().bfill()
                             if us_cpi_alineado_pct.notna().any():
                                 last_us_cpi_pct = us_cpi_alineado_pct.iloc[-1]
-                                close_mep_pct = close_mep_pct * (last_us_cpi_pct / us_cpi_alineado_pct)
-                                etiqueta_mep_pct = 'USD MEP real'
+                                close_ref_pct = close_ref_pct * (last_us_cpi_pct / us_cpi_alineado_pct)
+                                etiqueta_ref_pct = f'USD {usd_ghost_referencia} real'
 
                         if show_percentage_from_recent and len(stock_data) > 0:
-                            pct_change_mep = ((close_mep_pct.iloc[-1] / close_mep_pct) - 1) * 100
-                            pct_change_mep = pct_change_mep.clip(lower=-100)
+                            pct_change_ref = ((close_ref_pct.iloc[-1] / close_ref_pct) - 1) * 100
+                            pct_change_ref = pct_change_ref.clip(lower=-100)
                         else:
-                            pct_change_mep = (close_mep_pct / close_mep_pct.iloc[0] - 1) * 100
+                            pct_change_ref = (close_ref_pct / close_ref_pct.iloc[0] - 1) * 100
 
-                        etiqueta_mep_legend = 'USD MEP reales' if etiqueta_mep_pct == 'USD MEP real' else 'USD MEP'
+                        etiqueta_ref_legend = f'USD {usd_ghost_referencia} reales' if etiqueta_ref_pct.endswith('real') else f'USD {usd_ghost_referencia}'
                         fig.add_trace(
                             go.Scatter(
-                                x=stock_data.index, y=pct_change_mep, mode='lines',
-                                name=f'{display_name} — {etiqueta_mep_legend} (%)',
-                                line=dict(color=MEP_GHOST_COLOR, width=1.3, dash='dashdot'),
+                                x=stock_data.index, y=pct_change_ref, mode='lines',
+                                name=f'{display_name} — {etiqueta_ref_legend} (%)',
+                                line=dict(color=USD_GHOST_COLOR, width=1.3, dash='dashdot'),
                                 yaxis='y1', opacity=0.75,
-                                hovertemplate=f'Fecha: %{{x|%Y-%m-%d}}<br>Variación ({etiqueta_mep_legend}): %{{y:.2f}}%<extra></extra>'
+                                hovertemplate=f'Fecha: %{{x|%Y-%m-%d}}<br>Variación ({etiqueta_ref_legend}): %{{y:.2f}}%<extra></extra>'
                             )
                         )
                         ax_mpl.plot(
-                            stock_data.index, pct_change_mep, color=MEP_GHOST_COLOR, linewidth=1.3,
-                            linestyle='-.', alpha=0.75, label=f'{display_name} — {etiqueta_mep_legend} (%)'
+                            stock_data.index, pct_change_ref, color=USD_GHOST_COLOR, linewidth=1.3,
+                            linestyle='-.', alpha=0.75, label=f'{display_name} — {etiqueta_ref_legend} (%)'
                         )
 
 
@@ -530,64 +616,63 @@ def graficar_activos_ajustados(
                         linestyle=':', alpha=0.5, label=f'{display_name} Nominal'
                     )
 
-                if show_mep_ghost and moneda == 'ARS' and daily_mep is not None and not daily_mep.empty:
-                    mep_alineado = daily_mep.reindex(stock_data.index).ffill()
-                    if mep_alineado.notna().any():
-                        MEP_GHOST_COLOR = '#00CED1'  # turquesa fijo, distinto del color de cada ticker
-                        stock_data['Close_MEP'] = stock_data['Close'] / mep_alineado
+                if show_usd_ghost and moneda == 'ARS' and daily_usd_ref is not None and not daily_usd_ref.empty:
+                    ref_alineada = daily_usd_ref.reindex(stock_data.index).ffill()
+                    if ref_alineada.notna().any():
+                        stock_data['Close_USD_ref'] = stock_data['Close'] / ref_alineada
 
-                        etiqueta_mep = 'USD MEP'
-                        if mep_en_terminos_reales and daily_us_cpi_serie is not None and not daily_us_cpi_serie.empty:
+                        etiqueta_ref = f'USD {usd_ghost_referencia}'
+                        if usd_en_terminos_reales and daily_us_cpi_serie is not None and not daily_us_cpi_serie.empty:
                             us_cpi_alineado = daily_us_cpi_serie.reindex(stock_data.index).ffill().bfill()
                             if us_cpi_alineado.notna().any():
                                 last_us_cpi = us_cpi_alineado.iloc[-1]
-                                stock_data['Close_MEP'] = stock_data['Close_MEP'] * (last_us_cpi / us_cpi_alineado)
-                                etiqueta_mep = 'USD MEP real'
+                                stock_data['Close_USD_ref'] = stock_data['Close_USD_ref'] * (last_us_cpi / us_cpi_alineado)
+                                etiqueta_ref = f'USD {usd_ghost_referencia} real'
 
-                        serie_mep_plot = None
-                        yaxis_mep = 'y2'
-                        nombre_mep = f'{display_name} ({etiqueta_mep})'
-                        hover_mep = f'Fecha: %{{x|%Y-%m-%d}}<br>{etiqueta_mep}: %{{y:.2f}}<extra></extra>'
+                        serie_ref_plot = None
+                        yaxis_ref = 'y2'
+                        nombre_ref = f'{display_name} ({etiqueta_ref})'
+                        hover_ref = f'Fecha: %{{x|%Y-%m-%d}}<br>{etiqueta_ref}: %{{y:.2f}}<extra></extra>'
 
-                        if mep_ghost_modo == 'rebasado':
+                        if usd_ghost_modo == 'rebasado':
                             base_ticker = stock_data['Inflation_Adjusted_Close'].iloc[0]
-                            base_mep = stock_data['Close_MEP'].iloc[0]
-                            if pd.notna(base_ticker) and pd.notna(base_mep) and base_mep != 0:
-                                serie_mep_plot = stock_data['Close_MEP'] * (base_ticker / base_mep)
-                                yaxis_mep = 'y1'
-                                nombre_mep = f'{display_name} ({etiqueta_mep}, rebasado)'
-                                hover_mep = (
-                                    f'Fecha: %{{x|%Y-%m-%d}}<br>{etiqueta_mep} '
+                            base_ref = stock_data['Close_USD_ref'].iloc[0]
+                            if pd.notna(base_ticker) and pd.notna(base_ref) and base_ref != 0:
+                                serie_ref_plot = stock_data['Close_USD_ref'] * (base_ticker / base_ref)
+                                yaxis_ref = 'y1'
+                                nombre_ref = f'{display_name} ({etiqueta_ref}, rebasado)'
+                                hover_ref = (
+                                    f'Fecha: %{{x|%Y-%m-%d}}<br>{etiqueta_ref} '
                                     f'(rebasado al precio inicial): %{{y:.2f}} {moneda}<extra></extra>'
                                 )
                             # si no se puede rebasar (falta dato base), no se grafica esta línea
                         else:
-                            serie_mep_plot = stock_data['Close_MEP']
+                            serie_ref_plot = stock_data['Close_USD_ref']
 
-                        if serie_mep_plot is not None:
+                        if serie_ref_plot is not None:
                             fig.add_trace(
                                 go.Scatter(
-                                    x=stock_data.index, y=serie_mep_plot, mode='lines',
-                                    name=nombre_mep,
-                                    line=dict(color=MEP_GHOST_COLOR, width=1.3, dash='dashdot'),
-                                    yaxis=yaxis_mep, opacity=0.75,
-                                    hovertemplate=hover_mep
+                                    x=stock_data.index, y=serie_ref_plot, mode='lines',
+                                    name=nombre_ref,
+                                    line=dict(color=USD_GHOST_COLOR, width=1.3, dash='dashdot'),
+                                    yaxis=yaxis_ref, opacity=0.75,
+                                    hovertemplate=hover_ref
                                 )
                             )
-                            if yaxis_mep == 'y2':
+                            if yaxis_ref == 'y2':
                                 if ax_mpl2 is None:
                                     ax_mpl2 = ax_mpl.twinx()
-                                    ax_mpl2.set_ylabel(f'Precio en {etiqueta_mep}', color=MEP_GHOST_COLOR)
-                                    ax_mpl2.tick_params(axis='y', colors=MEP_GHOST_COLOR)
-                                    ax_mpl2.grid(True, color=MEP_GHOST_COLOR, alpha=0.15, linewidth=0.7)
+                                    ax_mpl2.set_ylabel(f'Precio en {etiqueta_ref}', color=USD_GHOST_COLOR)
+                                    ax_mpl2.tick_params(axis='y', colors=USD_GHOST_COLOR)
+                                    ax_mpl2.grid(True, color=USD_GHOST_COLOR, alpha=0.15, linewidth=0.7)
                                 ax_mpl2.plot(
-                                    stock_data.index, serie_mep_plot, color=MEP_GHOST_COLOR, linewidth=1.3,
-                                    linestyle='-.', alpha=0.75, label=nombre_mep
+                                    stock_data.index, serie_ref_plot, color=USD_GHOST_COLOR, linewidth=1.3,
+                                    linestyle='-.', alpha=0.75, label=nombre_ref
                                 )
                             else:
                                 ax_mpl.plot(
-                                    stock_data.index, serie_mep_plot, color=MEP_GHOST_COLOR, linewidth=1.3,
-                                    linestyle='-.', alpha=0.75, label=nombre_mep
+                                    stock_data.index, serie_ref_plot, color=USD_GHOST_COLOR, linewidth=1.3,
+                                    linestyle='-.', alpha=0.75, label=nombre_ref
                                 )
 
 
@@ -647,29 +732,31 @@ def graficar_activos_ajustados(
         tickformat=',.2f',
         ticksuffix='' if not is_percentage_mode else '%'
     )
-    if show_mep_ghost and not is_percentage_mode and mep_ghost_modo == 'absoluto':
-        titulo_eje_mep = 'Precio en USD MEP real' if (mep_en_terminos_reales and daily_us_cpi_serie is not None) else 'Precio en USD (MEP)'
+    if show_usd_ghost and not is_percentage_mode and usd_ghost_modo == 'absoluto':
+        titulo_eje_ref = f'Precio en USD {usd_ghost_referencia} real' if (usd_en_terminos_reales and daily_us_cpi_serie is not None) else f'Precio en USD ({usd_ghost_referencia})'
+        grid_rgba = 'rgba(0, 206, 209, 0.15)' if usd_ghost_referencia == 'MEP' else 'rgba(255, 165, 0, 0.15)'
         fig.update_layout(
             yaxis2=dict(
-                title=dict(text=titulo_eje_mep, font=dict(size=14, color='#00CED1')),
+                title=dict(text=titulo_eje_ref, font=dict(size=14, color=USD_GHOST_COLOR)),
                 overlaying='y', side='right', showgrid=True,
-                gridcolor='rgba(0, 206, 209, 0.15)', gridwidth=1,
-                tickformat=',.2f', color='#00CED1',
+                gridcolor=grid_rgba, gridwidth=1,
+                tickformat=',.2f', color=USD_GHOST_COLOR,
             )
         )
 
     st.plotly_chart(fig, use_container_width=True)
 
-    mep_disponible = daily_mep is not None and not daily_mep.empty
+    ref_disponible = daily_usd_ref is not None and not daily_usd_ref.empty
     notas = _construir_notas_aclaratorias(
         is_percentage_mode=is_percentage_mode,
         show_percentage_from_recent=show_percentage_from_recent,
         show_nominal_ghost=show_nominal_ghost,
         algun_ticker_ajustado=algun_ticker_ajustado,
-        show_mep_ghost=show_mep_ghost,
+        show_usd_ghost=show_usd_ghost,
         moneda=moneda,
-        mep_disponible=mep_disponible,
-        mep_ghost_modo=mep_ghost_modo,
+        ref_disponible=ref_disponible,
+        usd_ghost_modo=usd_ghost_modo,
+        usd_ghost_referencia=usd_ghost_referencia,
     )
     for emoji_nota, texto_nota in notas:
         st.caption(f"{emoji_nota} {texto_nota}")
@@ -1110,6 +1197,26 @@ def load_mep_data():
         return pd.Series(dtype=float)
 
 
+def load_ccl_data():
+    """
+    Serie diaria del dólar Contado con Liquidación (CCL), vía ArgentinaDatos.
+    Misma fuente y misma lógica que load_mep_data (casa='contadoconliqui' en
+    vez de 'bolsa'); los días sin rueda se completan con el último valor conocido.
+    """
+    try:
+        response = requests.get("https://api.argentinadatos.com/v1/cotizaciones/dolares/contadoconliqui", timeout=15)
+        response.raise_for_status()
+        ccl = pd.DataFrame(response.json())
+        ccl["fecha"] = pd.to_datetime(ccl["fecha"])
+        ccl = ccl.rename(columns={"venta": "CCL"})[["fecha", "CCL"]].set_index("fecha").sort_index()
+        rango_completo = pd.date_range(ccl.index.min(), datetime.now().date(), freq="D")
+        ccl = ccl.reindex(rango_completo).ffill()
+        return ccl["CCL"]
+    except Exception as e:
+        logger.error(f"Error obteniendo CCL histórico: {e}")
+        return pd.Series(dtype=float)
+
+
 def _resolver_ticker_bono(ticker, cashflows_df):
     """Normaliza el ticker ingresado (ej. 'AL30', 'AL30.BA') contra el
     ticker usado en el CSV de cashflows (ej. 'AL30D')."""
@@ -1459,6 +1566,7 @@ mostrar_avisos_extrapolacion()
 # Load bond cashflows + MEP (para ajuste por cupones cobrados)
 cashflows_bonos = cargar_cashflows_bonos()
 daily_mep = load_mep_data()
+daily_ccl = load_ccl_data()
 
 # ------------------------------
 # Streamlit UI
@@ -1878,31 +1986,46 @@ with tab2:
         value=False,
         key='show_nominal_ghost_arg'
     )
-    show_mep_ghost_arg = st.checkbox(
-        'Incluir línea fantasma con el precio en USD MEP',
+    show_usd_ghost_arg = st.checkbox(
+        'Incluir línea fantasma con el precio en USD (MEP o CCL)',
         value=False,
-        key='show_mep_ghost_arg'
+        key='show_usd_ghost_arg'
     )
-    if show_mep_ghost_arg and not is_percentage_mode:
-        mep_ghost_modo_label = st.radio(
-            'Cómo mostrar la línea de USD MEP:',
+    if show_usd_ghost_arg:
+        usd_ghost_referencia_arg = st.radio(
+            'Referencia de dólar a usar:',
+            ('MEP', 'CCL'),
+            index=0,
+            key='usd_ghost_referencia_arg',
+            help=(
+                'MEP: dólar bolsa, liquidado íntegramente dentro del sistema financiero '
+                'argentino; más líquido y el benchmark estándar para "¿le gané al dólar?". '
+                'CCL: contado con liqui, la pata en dólares se liquida en el exterior; suele '
+                'cotizar con una prima sobre el MEP (la "brecha").'
+            )
+        )
+    else:
+        usd_ghost_referencia_arg = 'MEP'
+    if show_usd_ghost_arg and not is_percentage_mode:
+        usd_ghost_modo_label = st.radio(
+            f'Cómo mostrar la línea de USD {usd_ghost_referencia_arg}:',
             (
                 'Rebasado al precio inicial del ticker (mismo eje, recomendado)',
                 'Precio absoluto en USD (eje secundario)',
             ),
             index=0,
-            key='mep_ghost_modo_arg',
+            key='usd_ghost_modo_arg',
             help=(
-                'Rebasado: la línea MEP arranca en el mismo valor que el precio ajustado del '
-                'ticker y se grafica en el mismo eje; una divergencia sí indica que el activo '
-                'le ganó o le perdió al dólar MEP. Eje secundario: muestra el precio real en '
-                'USD, pero al autoescalarse cada eje por separado, un cruce entre líneas no '
-                'implica igualdad de valor.'
+                f'Rebasado: la línea {usd_ghost_referencia_arg} arranca en el mismo valor que '
+                'el precio ajustado del ticker y se grafica en el mismo eje; una divergencia sí '
+                f'indica que el activo le ganó o le perdió al dólar {usd_ghost_referencia_arg}. '
+                'Eje secundario: muestra el precio real en USD, pero al autoescalarse cada eje '
+                'por separado, un cruce entre líneas no implica igualdad de valor.'
             )
         )
-        mep_ghost_modo_arg = 'rebasado' if mep_ghost_modo_label.startswith('Rebasado') else 'absoluto'
+        usd_ghost_modo_arg = 'rebasado' if usd_ghost_modo_label.startswith('Rebasado') else 'absoluto'
     else:
-        mep_ghost_modo_arg = 'rebasado'
+        usd_ghost_modo_arg = 'rebasado'
     retorno_total_cupones_arg = st.checkbox(
         'Bonos: usar retorno total (cupones reinvertidos) en vez de precio limpio',
         value=False,
@@ -1915,11 +2038,11 @@ with tab2:
         )
     )
     metodo_cupones_arg = 'retorno_total' if retorno_total_cupones_arg else 'limpio'
-    mep_real_arg = st.checkbox(
-        'Deflactar la línea de USD MEP por inflación de EE.UU. (dólares reales)',
+    usd_ghost_real_arg = st.checkbox(
+        'Deflactar la línea de USD por inflación de EE.UU. (dólares reales)',
         value=False,
-        key='mep_real_arg',
-        help='Solo tiene efecto si está tildada "Incluir línea fantasma con el precio en USD MEP".'
+        key='usd_ghost_real_arg',
+        help='Solo tiene efecto si está tildada "Incluir línea fantasma con el precio en USD (MEP o CCL)".'
     )
 
     # Diccionarios para almacenar datos (for Argentine tab)
@@ -1943,11 +2066,39 @@ with tab2:
             plot_end_date=plot_end_date,
             sma_line_width=sma_line_width,
             data_line_width=data_line_width,
-            show_mep_ghost=show_mep_ghost_arg,
+            show_usd_ghost=show_usd_ghost_arg,
             metodo_cupones=metodo_cupones_arg,
             daily_us_cpi_serie=daily_us_cpi,
-            mep_en_terminos_reales=mep_real_arg,
-            mep_ghost_modo=mep_ghost_modo_arg,
+            usd_en_terminos_reales=usd_ghost_real_arg,
+            usd_ghost_modo=usd_ghost_modo_arg,
+            usd_ghost_referencia=usd_ghost_referencia_arg,
+        )
+
+    st.divider()
+    comparar_mep_ccl_arg = st.checkbox(
+        'Comparar MEP vs CCL directamente (brecha cambiaria, sin pasar por ningún ticker)',
+        value=False,
+        key='comparar_mep_ccl_arg',
+        help=(
+            'A diferencia del ghost de arriba (que compara un ticker contra el dólar), acá se '
+            'grafican MEP y CCL entre sí. Como ambos están en la misma unidad (pesos por '
+            'dólar), es una comparación directa y válida en un solo eje, sin necesidad de '
+            'rebasar nada.'
+        )
+    )
+    if comparar_mep_ccl_arg:
+        mep_ccl_real_arg = st.checkbox(
+            'Deflactar MEP y CCL por inflación de EE.UU. (dólares reales)',
+            value=False,
+            key='mep_ccl_real_arg'
+        )
+        graficar_mep_vs_ccl(
+            daily_mep_serie=daily_mep,
+            daily_ccl_serie=daily_ccl,
+            plot_start_date=plot_start_date,
+            plot_end_date=plot_end_date,
+            en_terminos_reales=mep_ccl_real_arg,
+            daily_us_cpi_serie=daily_us_cpi,
         )
 
 with tab3:
