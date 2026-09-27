@@ -164,6 +164,7 @@ def graficar_activos_ajustados(
     metodo_cupones='limpio',
     daily_us_cpi_serie=None,
     mep_en_terminos_reales=False,
+    mep_ghost_modo='absoluto',
 ):
     """
     Descarga, ajusta por inflación y grafica (Plotly + Matplotlib/Seaborn) una lista de tickers.
@@ -172,8 +173,16 @@ def graficar_activos_ajustados(
     force_inflation solo aplica cuando siempre_ajustar=False (pestaña Argentina).
     show_nominal_ghost agrega, por ticker, una línea punteada "fantasma" con el valor nominal
     (sin ajustar por inflación), tanto en modo absoluto como en modo porcentual.
-    show_mep_ghost agrega, por ticker (solo en modo absoluto), una línea "fantasma" con el
-    precio nominal convertido a USD MEP, en un eje Y secundario.
+    show_mep_ghost agrega, por ticker, una línea "fantasma" con el precio convertido a USD MEP.
+    En modo porcentual siempre se expresa como variación % en el mismo eje que el ticker.
+    En modo absoluto, mep_ghost_modo decide cómo se muestra:
+      - 'absoluto': precio en USD MEP tal cual, en un eje Y secundario independiente
+        (ojo: al autoescalarse cada eje por separado, un cruce entre líneas no implica
+        igualdad de valor real).
+      - 'rebasado': la serie MEP se reescala para arrancar en el mismo valor que el precio
+        ajustado del ticker en la primera fecha visible, y se grafica en el MISMO eje (y1).
+        Así, la distancia/pendiente entre ambas líneas sí es interpretable económicamente:
+        muestra si el activo le ganó o le perdió al dólar MEP desde el inicio del período.
     plot_end_date permite fijar la fecha final del rango (por defecto, la fecha actual /
     el último dato de IPC disponible, igual que antes).
     Devuelve (stock_data_dict_nominal, stock_data_dict_adjusted, ticker_var_map).
@@ -328,6 +337,39 @@ def graficar_activos_ajustados(
                         stock_data.index, pct_change_nom, color=color, linewidth=1,
                         linestyle=':', alpha=0.55, label=f'{display_name} Nominal (%)'
                     )
+
+                if show_mep_ghost and moneda == 'ARS' and daily_mep is not None and not daily_mep.empty:
+                    mep_alineado_pct = daily_mep.reindex(stock_data.index).ffill()
+                    if mep_alineado_pct.notna().any():
+                        MEP_GHOST_COLOR = '#00CED1'
+                        close_mep_pct = stock_data['Close'] / mep_alineado_pct
+                        etiqueta_mep_pct = 'USD MEP'
+                        if mep_en_terminos_reales and daily_us_cpi_serie is not None and not daily_us_cpi_serie.empty:
+                            us_cpi_alineado_pct = daily_us_cpi_serie.reindex(stock_data.index).ffill().bfill()
+                            if us_cpi_alineado_pct.notna().any():
+                                last_us_cpi_pct = us_cpi_alineado_pct.iloc[-1]
+                                close_mep_pct = close_mep_pct * (last_us_cpi_pct / us_cpi_alineado_pct)
+                                etiqueta_mep_pct = 'USD MEP real'
+
+                        if show_percentage_from_recent and len(stock_data) > 0:
+                            pct_change_mep = ((close_mep_pct.iloc[-1] / close_mep_pct) - 1) * 100
+                            pct_change_mep = pct_change_mep.clip(lower=-100)
+                        else:
+                            pct_change_mep = (close_mep_pct / close_mep_pct.iloc[0] - 1) * 100
+
+                        fig.add_trace(
+                            go.Scatter(
+                                x=stock_data.index, y=pct_change_mep, mode='lines',
+                                name=f'{display_name} ({etiqueta_mep_pct}, %)',
+                                line=dict(color=MEP_GHOST_COLOR, width=1.3, dash='dashdot'),
+                                yaxis='y1', opacity=0.75,
+                                hovertemplate=f'Fecha: %{{x|%Y-%m-%d}}<br>{etiqueta_mep_pct}: %{{y:.2f}}%<extra></extra>'
+                            )
+                        )
+                        ax_mpl.plot(
+                            stock_data.index, pct_change_mep, color=MEP_GHOST_COLOR, linewidth=1.3,
+                            linestyle='-.', alpha=0.75, label=f'{display_name} ({etiqueta_mep_pct}, %)'
+                        )
             else:
                 fig.add_trace(
                     go.Scatter(
@@ -378,24 +420,51 @@ def graficar_activos_ajustados(
                                 stock_data['Close_MEP'] = stock_data['Close_MEP'] * (last_us_cpi / us_cpi_alineado)
                                 etiqueta_mep = 'USD MEP real'
 
-                        fig.add_trace(
-                            go.Scatter(
-                                x=stock_data.index, y=stock_data['Close_MEP'], mode='lines',
-                                name=f'{display_name} ({etiqueta_mep})',
-                                line=dict(color=MEP_GHOST_COLOR, width=1.3, dash='dashdot'),
-                                yaxis='y2', opacity=0.75,
-                                hovertemplate=f'Fecha: %{{x|%Y-%m-%d}}<br>{etiqueta_mep}: %{{y:.2f}}<extra></extra>'
+                        serie_mep_plot = None
+                        yaxis_mep = 'y2'
+                        nombre_mep = f'{display_name} ({etiqueta_mep})'
+                        hover_mep = f'Fecha: %{{x|%Y-%m-%d}}<br>{etiqueta_mep}: %{{y:.2f}}<extra></extra>'
+
+                        if mep_ghost_modo == 'rebasado':
+                            base_ticker = stock_data['Inflation_Adjusted_Close'].iloc[0]
+                            base_mep = stock_data['Close_MEP'].iloc[0]
+                            if pd.notna(base_ticker) and pd.notna(base_mep) and base_mep != 0:
+                                serie_mep_plot = stock_data['Close_MEP'] * (base_ticker / base_mep)
+                                yaxis_mep = 'y1'
+                                nombre_mep = f'{display_name} ({etiqueta_mep}, rebasado)'
+                                hover_mep = (
+                                    f'Fecha: %{{x|%Y-%m-%d}}<br>{etiqueta_mep} '
+                                    f'(rebasado al precio inicial): %{{y:.2f}} {moneda}<extra></extra>'
+                                )
+                            # si no se puede rebasar (falta dato base), no se grafica esta línea
+                        else:
+                            serie_mep_plot = stock_data['Close_MEP']
+
+                        if serie_mep_plot is not None:
+                            fig.add_trace(
+                                go.Scatter(
+                                    x=stock_data.index, y=serie_mep_plot, mode='lines',
+                                    name=nombre_mep,
+                                    line=dict(color=MEP_GHOST_COLOR, width=1.3, dash='dashdot'),
+                                    yaxis=yaxis_mep, opacity=0.75,
+                                    hovertemplate=hover_mep
+                                )
                             )
-                        )
-                        if ax_mpl2 is None:
-                            ax_mpl2 = ax_mpl.twinx()
-                            ax_mpl2.set_ylabel(f'Precio en {etiqueta_mep}', color=MEP_GHOST_COLOR)
-                            ax_mpl2.tick_params(axis='y', colors=MEP_GHOST_COLOR)
-                            ax_mpl2.grid(True, color=MEP_GHOST_COLOR, alpha=0.15, linewidth=0.7)
-                        ax_mpl2.plot(
-                            stock_data.index, stock_data['Close_MEP'], color=MEP_GHOST_COLOR, linewidth=1.3,
-                            linestyle='-.', alpha=0.75, label=f'{display_name} ({etiqueta_mep})'
-                        )
+                            if yaxis_mep == 'y2':
+                                if ax_mpl2 is None:
+                                    ax_mpl2 = ax_mpl.twinx()
+                                    ax_mpl2.set_ylabel(f'Precio en {etiqueta_mep}', color=MEP_GHOST_COLOR)
+                                    ax_mpl2.tick_params(axis='y', colors=MEP_GHOST_COLOR)
+                                    ax_mpl2.grid(True, color=MEP_GHOST_COLOR, alpha=0.15, linewidth=0.7)
+                                ax_mpl2.plot(
+                                    stock_data.index, serie_mep_plot, color=MEP_GHOST_COLOR, linewidth=1.3,
+                                    linestyle='-.', alpha=0.75, label=nombre_mep
+                                )
+                            else:
+                                ax_mpl.plot(
+                                    stock_data.index, serie_mep_plot, color=MEP_GHOST_COLOR, linewidth=1.3,
+                                    linestyle='-.', alpha=0.75, label=nombre_mep
+                                )
 
 
             if i == 0 and len(stock_data) > 0:
@@ -454,7 +523,7 @@ def graficar_activos_ajustados(
         tickformat=',.2f',
         ticksuffix='' if not is_percentage_mode else '%'
     )
-    if show_mep_ghost:
+    if show_mep_ghost and not is_percentage_mode and mep_ghost_modo == 'absoluto':
         titulo_eje_mep = 'Precio en USD MEP real' if (mep_en_terminos_reales and daily_us_cpi_serie is not None) else 'Precio en USD (MEP)'
         fig.update_layout(
             yaxis2=dict(
@@ -1669,10 +1738,30 @@ with tab2:
         key='show_nominal_ghost_arg'
     )
     show_mep_ghost_arg = st.checkbox(
-        'Incluir línea fantasma con el precio en USD MEP (eje secundario)',
+        'Incluir línea fantasma con el precio en USD MEP',
         value=False,
         key='show_mep_ghost_arg'
     )
+    if show_mep_ghost_arg and not is_percentage_mode:
+        mep_ghost_modo_label = st.radio(
+            'Cómo mostrar la línea de USD MEP:',
+            (
+                'Rebasado al precio inicial del ticker (mismo eje, recomendado)',
+                'Precio absoluto en USD (eje secundario)',
+            ),
+            index=0,
+            key='mep_ghost_modo_arg',
+            help=(
+                'Rebasado: la línea MEP arranca en el mismo valor que el precio ajustado del '
+                'ticker y se grafica en el mismo eje; una divergencia sí indica que el activo '
+                'le ganó o le perdió al dólar MEP. Eje secundario: muestra el precio real en '
+                'USD, pero al autoescalarse cada eje por separado, un cruce entre líneas no '
+                'implica igualdad de valor.'
+            )
+        )
+        mep_ghost_modo_arg = 'rebasado' if mep_ghost_modo_label.startswith('Rebasado') else 'absoluto'
+    else:
+        mep_ghost_modo_arg = 'rebasado'
     retorno_total_cupones_arg = st.checkbox(
         'Bonos: usar retorno total (cupones reinvertidos) en vez de precio limpio',
         value=False,
@@ -1717,6 +1806,7 @@ with tab2:
             metodo_cupones=metodo_cupones_arg,
             daily_us_cpi_serie=daily_us_cpi,
             mep_en_terminos_reales=mep_real_arg,
+            mep_ghost_modo=mep_ghost_modo_arg,
         )
 
 with tab3:
