@@ -560,7 +560,15 @@ def graficar_activos_ajustados(
 
     nota_pie_mpl = None
     if show_mep_ghost and moneda == 'ARS' and daily_mep is not None and not daily_mep.empty:
-        if is_percentage_mode:
+        if is_percentage_mode and show_percentage_from_recent:
+            nota_pie_mpl = (
+                "Nota: acá el 0% está en la fecha más reciente y las variaciones se calculan "
+                "hacia atrás (cada punto es el retorno desde esa fecha hasta hoy). Ambas líneas "
+                "llegan a 0% juntas al final; la brecha en cualquier punto anterior es la "
+                "diferencia de retorno acumulado hasta hoy entre ARS reales y USD MEP reales."
+            )
+            st.caption("ℹ️ " + nota_pie_mpl[len("Nota: "):])
+        elif is_percentage_mode:
             nota_pie_mpl = (
                 "Nota: ambas líneas parten de 0% en la fecha de inicio del gráfico. La brecha "
                 "entre ellas es la ganancia/pérdida real en dólares MEP por encima (o por debajo) "
