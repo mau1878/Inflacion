@@ -113,7 +113,11 @@ def _finalizar_grafico_mpl(fig, ax, titulo, ylabel_txt, is_percentage, use_log_s
 
     nota_lineas = []
     if nota_pie:
-        nota_lineas = textwrap.wrap(nota_pie, width=100)
+        notas_individuales = nota_pie if isinstance(nota_pie, (list, tuple)) else [nota_pie]
+        for idx_nota, texto_nota in enumerate(notas_individuales):
+            if idx_nota > 0:
+                nota_lineas.append("")  # línea en blanco entre aclaraciones
+            nota_lineas.extend(textwrap.wrap(texto_nota, width=100))
 
     if handles:
         ncols = min(len(labels), 3)
@@ -136,6 +140,88 @@ def _finalizar_grafico_mpl(fig, ax, titulo, ylabel_txt, is_percentage, use_log_s
             0.5, 0.01, "\n".join(nota_lineas),
             ha='center', va='bottom', fontsize=7.5, color='#bbbbbb', wrap=True
         )
+
+
+def _construir_notas_aclaratorias(
+    is_percentage_mode,
+    show_percentage_from_recent,
+    show_nominal_ghost,
+    algun_ticker_ajustado,
+    show_mep_ghost,
+    moneda,
+    mep_disponible,
+    mep_ghost_modo,
+):
+    """Arma la lista de aclaraciones pertinentes a la combinación de modos activa en el
+    gráfico (porcentual/absoluto, desde inicio/desde reciente, ghost nominal, ghost MEP y
+    su submodo). Cada nota es independiente y solo se agrega si la combinación la amerita,
+    evitando tanto huecos (modos sin ninguna aclaración) como redundancia entre notas.
+    Devuelve una lista de tuplas (emoji, texto)."""
+    notas = []
+
+    if is_percentage_mode:
+        if show_nominal_ghost and algun_ticker_ajustado:
+            notas.append((
+                "ℹ️",
+                "La línea 'Nominal (%)' es la variación del precio de mercado sin ajustar por "
+                "inflación; la diferencia con la línea 'reales (%)' es el efecto de la "
+                "inflación acumulada en el período."
+            ))
+        elif algun_ticker_ajustado:
+            notas.append((
+                "ℹ️",
+                "La línea 'reales (%)' está calculada sobre el precio ajustado por inflación "
+                "(poder adquisitivo de la fecha más reciente del gráfico), no sobre el precio "
+                "nominal de mercado."
+            ))
+        if show_percentage_from_recent:
+            notas.append((
+                "ℹ️",
+                "El 0% está fijado en la fecha más reciente del gráfico: cada punto muestra el "
+                "retorno acumulado desde esa fecha hasta hoy, calculado \"hacia atrás\" (no es "
+                "una serie que arranca en el inicio)."
+            ))
+        if show_mep_ghost and moneda == 'ARS' and mep_disponible:
+            notas.append((
+                "ℹ️",
+                "La brecha entre la línea en ARS reales y la línea en USD MEP reales es la "
+                "ganancia/pérdida real en dólares MEP por encima (o por debajo) del ajuste por "
+                "inflación argentina — no son dos mediciones del mismo concepto."
+            ))
+    else:
+        if show_nominal_ghost and algun_ticker_ajustado:
+            notas.append((
+                "ℹ️",
+                "La línea punteada 'Nominal' es el precio de mercado sin ajustar por inflación; "
+                "la diferencia con la línea sólida ajustada es el efecto de la inflación "
+                "acumulada."
+            ))
+        elif algun_ticker_ajustado:
+            notas.append((
+                "ℹ️",
+                "El precio graficado está ajustado por inflación: expresa cada valor histórico "
+                "en poder adquisitivo de la fecha más reciente del gráfico, no el precio "
+                "nominal de mercado de cada día."
+            ))
+        if show_mep_ghost and moneda == 'ARS' and mep_disponible:
+            if mep_ghost_modo == 'rebasado':
+                notas.append((
+                    "ℹ️",
+                    "La línea de USD MEP arranca en el mismo valor que el precio ajustado del "
+                    "ticker en la fecha de inicio y comparte el mismo eje. La brecha que se "
+                    "abre a partir de ahí es la ganancia/pérdida real en dólares MEP — no "
+                    "representa el precio real en USD."
+                ))
+            else:
+                notas.append((
+                    "⚠️",
+                    "La línea de USD MEP usa un eje derecho independiente, con su propia escala "
+                    "automática. Un cruce o acercamiento entre las líneas no implica igualdad de "
+                    "valor: para comparar rendimientos relativos, usá la opción \"Rebasado al "
+                    "precio inicial\"."
+                ))
+
+    return notas
 
 
 def add_marker_lines(fig, items, color, y_top, name, dash="dot"):
@@ -214,6 +300,7 @@ def graficar_activos_ajustados(
     ticker_var_map = {ticker: ticker.replace('.', '_') for ticker in tickers}
     stock_data_dict_nominal = {}
     stock_data_dict_adjusted = {}
+    algun_ticker_ajustado = False
 
     if plot_end_date is None:
         end_date = daily_cpi_serie.index.max().date() + timedelta(days=1)
@@ -251,6 +338,9 @@ def graficar_activos_ajustados(
                     (data_source == 'YFinance' and (ticker.endswith('.BA') or ticker == '^MERV')) or
                     (data_source != 'YFinance')
                 )
+
+            if needs_inflation_adjustment:
+                algun_ticker_ajustado = True
 
             if needs_inflation_adjustment and not stock_data.empty:
                 daily_cpi_clean = daily_cpi_serie.copy()
@@ -558,43 +648,23 @@ def graficar_activos_ajustados(
 
     st.plotly_chart(fig, use_container_width=True)
 
-    nota_pie_mpl = None
-    if show_mep_ghost and moneda == 'ARS' and daily_mep is not None and not daily_mep.empty:
-        if is_percentage_mode and show_percentage_from_recent:
-            nota_pie_mpl = (
-                "Nota: acá el 0% está en la fecha más reciente y las variaciones se calculan "
-                "hacia atrás (cada punto es el retorno desde esa fecha hasta hoy). Ambas líneas "
-                "llegan a 0% juntas al final; la brecha en cualquier punto anterior es la "
-                "diferencia de retorno acumulado hasta hoy entre ARS reales y USD MEP reales."
-            )
-            st.caption("ℹ️ " + nota_pie_mpl[len("Nota: "):])
-        elif is_percentage_mode:
-            nota_pie_mpl = (
-                "Nota: ambas líneas parten de 0% en la fecha de inicio del gráfico. La brecha "
-                "entre ellas es la ganancia/pérdida real en dólares MEP por encima (o por debajo) "
-                "del ajuste por inflación argentina — no son dos mediciones del mismo concepto."
-            )
-            st.caption("ℹ️ " + nota_pie_mpl[len("Nota: "):])
-        elif mep_ghost_modo == 'rebasado':
-            nota_pie_mpl = (
-                "Nota: la línea de USD MEP arranca en el mismo valor que el precio ajustado del "
-                "ticker en la fecha de inicio y comparte el mismo eje. La brecha que se abre a "
-                "partir de ahí es la ganancia/pérdida real en dólares MEP — no representa el "
-                "precio real en USD."
-            )
-            st.caption("ℹ️ " + nota_pie_mpl[len("Nota: "):])
-        else:
-            nota_pie_mpl = (
-                "Atención: la línea de USD MEP usa un eje derecho independiente, con su propia "
-                "escala automática. Un cruce o acercamiento entre las líneas no implica igualdad "
-                "de valor: para comparar rendimientos relativos, usá la opción \"Rebasado al "
-                "precio inicial\"."
-            )
-            st.caption("⚠️ " + nota_pie_mpl[len("Atención: "):])
+    mep_disponible = daily_mep is not None and not daily_mep.empty
+    notas = _construir_notas_aclaratorias(
+        is_percentage_mode=is_percentage_mode,
+        show_percentage_from_recent=show_percentage_from_recent,
+        show_nominal_ghost=show_nominal_ghost,
+        algun_ticker_ajustado=algun_ticker_ajustado,
+        show_mep_ghost=show_mep_ghost,
+        moneda=moneda,
+        mep_disponible=mep_disponible,
+        mep_ghost_modo=mep_ghost_modo,
+    )
+    for emoji_nota, texto_nota in notas:
+        st.caption(f"{emoji_nota} {texto_nota}")
 
     _finalizar_grafico_mpl(
         fig_mpl, ax_mpl, titulo, ylabel, is_percentage_mode, use_log_scale,
-        ax2=ax_mpl2, nota_pie=nota_pie_mpl
+        ax2=ax_mpl2, nota_pie=[texto for _, texto in notas] if notas else None
     )
     st.pyplot(fig_mpl)
     plt.close(fig_mpl)
