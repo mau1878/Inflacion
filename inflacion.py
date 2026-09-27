@@ -5,6 +5,7 @@ import plotly.graph_objs as go
 from datetime import datetime, timedelta
 import logging
 import re
+import textwrap
 import requests
 import urllib3
 import time
@@ -84,9 +85,11 @@ plt.rcParams.update({
 })
 
 
-def _finalizar_grafico_mpl(fig, ax, titulo, ylabel_txt, is_percentage, use_log_scale, ax2=None):
+def _finalizar_grafico_mpl(fig, ax, titulo, ylabel_txt, is_percentage, use_log_scale, ax2=None, nota_pie=None):
     """Aplica estilo consistente (oscuro, marca de agua, formato de fechas) a un gráfico Matplotlib/Seaborn.
-    ax2, si se pasa, es un eje secundario (twinx) cuyas líneas se suman a la leyenda combinada."""
+    ax2, si se pasa, es un eje secundario (twinx) cuyas líneas se suman a la leyenda combinada.
+    nota_pie, si se pasa, se imprime como texto envuelto al pie de la figura (para que quede
+    incluido al copiar/descargar la imagen, no solo como st.caption en la app)."""
     ax.set_title(titulo, fontsize=15, color='white', pad=12)
     ax.set_xlabel('Fecha', fontsize=11)
     ax.set_ylabel(ylabel_txt, fontsize=11)
@@ -107,15 +110,31 @@ def _finalizar_grafico_mpl(fig, ax, titulo, ylabel_txt, is_percentage, use_log_s
     if ax2 is not None:
         handles2, labels2 = ax2.get_legend_handles_labels()
         handles, labels = handles + handles2, labels + labels2
+
+    nota_lineas = []
+    if nota_pie:
+        nota_lineas = textwrap.wrap(nota_pie, width=100)
+
     if handles:
         ncols = min(len(labels), 3)
         filas_leyenda = -(-len(labels) // ncols)  # redondeo hacia arriba
         espacio_inferior = 0.22 + 0.06 * filas_leyenda
+        if nota_lineas:
+            espacio_inferior += 0.035 * len(nota_lineas)
         fig.subplots_adjust(bottom=espacio_inferior)
         ax.legend(
             handles, labels,
-            loc='upper center', bbox_to_anchor=(0.5, -espacio_inferior * 1.35),
+            loc='upper center', bbox_to_anchor=(0.5, -espacio_inferior * 1.35 + 0.05 * len(nota_lineas)),
             ncol=ncols, fontsize=8
+        )
+    elif nota_lineas:
+        espacio_inferior = 0.1 + 0.035 * len(nota_lineas)
+        fig.subplots_adjust(bottom=espacio_inferior)
+
+    if nota_lineas:
+        fig.text(
+            0.5, 0.01, "\n".join(nota_lineas),
+            ha='center', va='bottom', fontsize=7.5, color='#bbbbbb', wrap=True
         )
 
 
@@ -539,29 +558,36 @@ def graficar_activos_ajustados(
 
     st.plotly_chart(fig, use_container_width=True)
 
+    nota_pie_mpl = None
     if show_mep_ghost and moneda == 'ARS' and daily_mep is not None and not daily_mep.empty:
         if is_percentage_mode:
-            st.caption(
-                "ℹ️ Ambas líneas parten de 0% en la fecha de inicio del gráfico. La brecha entre "
-                "ellas es la ganancia/pérdida real en dólares MEP por encima (o por debajo) del "
-                "ajuste por inflación argentina — no son dos mediciones del mismo concepto."
+            nota_pie_mpl = (
+                "Nota: ambas líneas parten de 0% en la fecha de inicio del gráfico. La brecha "
+                "entre ellas es la ganancia/pérdida real en dólares MEP por encima (o por debajo) "
+                "del ajuste por inflación argentina — no son dos mediciones del mismo concepto."
             )
+            st.caption("ℹ️ " + nota_pie_mpl[len("Nota: "):])
         elif mep_ghost_modo == 'rebasado':
-            st.caption(
-                "ℹ️ La línea de USD MEP arranca en el mismo valor que el precio ajustado del "
+            nota_pie_mpl = (
+                "Nota: la línea de USD MEP arranca en el mismo valor que el precio ajustado del "
                 "ticker en la fecha de inicio y comparte el mismo eje. La brecha que se abre a "
                 "partir de ahí es la ganancia/pérdida real en dólares MEP — no representa el "
                 "precio real en USD."
             )
+            st.caption("ℹ️ " + nota_pie_mpl[len("Nota: "):])
         else:
-            st.caption(
-                "⚠️ La línea de USD MEP usa un eje derecho independiente, con su propia escala "
-                "automática. Un cruce o acercamiento entre las líneas no implica igualdad de "
-                "valor: para comparar rendimientos relativos, usá la opción \"Rebasado al precio "
-                "inicial\"."
+            nota_pie_mpl = (
+                "Atención: la línea de USD MEP usa un eje derecho independiente, con su propia "
+                "escala automática. Un cruce o acercamiento entre las líneas no implica igualdad "
+                "de valor: para comparar rendimientos relativos, usá la opción \"Rebasado al "
+                "precio inicial\"."
             )
+            st.caption("⚠️ " + nota_pie_mpl[len("Atención: "):])
 
-    _finalizar_grafico_mpl(fig_mpl, ax_mpl, titulo, ylabel, is_percentage_mode, use_log_scale, ax2=ax_mpl2)
+    _finalizar_grafico_mpl(
+        fig_mpl, ax_mpl, titulo, ylabel, is_percentage_mode, use_log_scale,
+        ax2=ax_mpl2, nota_pie=nota_pie_mpl
+    )
     st.pyplot(fig_mpl)
     plt.close(fig_mpl)
 
