@@ -119,26 +119,38 @@ def _finalizar_grafico_mpl(fig, ax, titulo, ylabel_txt, is_percentage, use_log_s
                 nota_lineas.append("")  # línea en blanco entre aclaraciones
             nota_lineas.extend(textwrap.wrap(texto_nota, width=100))
 
+    # Posicionamiento en fracción de FIGURA (no de ejes), apilando de arriba hacia abajo:
+    # [ zona de fechas rotadas + "Fecha" ] -> [ leyenda ] -> [ notas ].
+    # Al no depender de la altura del axes ni de fórmulas que se retroalimentan entre sí,
+    # esto no se rompe si crece la cantidad de notas o de filas de leyenda.
+    ALTO_TICKS_XLABEL = 0.17
+    ALTO_FILA_LEYENDA = 0.05
+    ALTO_LINEA_NOTA = 0.028
+    SEP_LEYENDA_NOTA = 0.02
+    ESPACIO_INFERIOR_MAX = 0.75  # nunca comerse casi toda la figura
+
+    ncols = min(len(labels), 3) if handles else 0
+    filas_leyenda = (-(-len(labels) // ncols)) if handles else 0  # redondeo hacia arriba
+    alto_leyenda = filas_leyenda * ALTO_FILA_LEYENDA
+    alto_notas = (len(nota_lineas) * ALTO_LINEA_NOTA + SEP_LEYENDA_NOTA) if nota_lineas else 0
+
+    espacio_inferior = min(ALTO_TICKS_XLABEL + alto_leyenda + alto_notas, ESPACIO_INFERIOR_MAX)
+    fig.subplots_adjust(bottom=espacio_inferior)
+
     if handles:
-        ncols = min(len(labels), 3)
-        filas_leyenda = -(-len(labels) // ncols)  # redondeo hacia arriba
-        espacio_inferior = 0.22 + 0.06 * filas_leyenda
-        if nota_lineas:
-            espacio_inferior += 0.035 * len(nota_lineas)
-        fig.subplots_adjust(bottom=espacio_inferior)
+        y_leyenda = espacio_inferior - ALTO_TICKS_XLABEL - alto_leyenda / 2
         ax.legend(
             handles, labels,
-            loc='upper center', bbox_to_anchor=(0.5, -espacio_inferior * 1.35 + 0.05 * len(nota_lineas)),
+            loc='center', bbox_to_anchor=(0.5, y_leyenda), bbox_transform=fig.transFigure,
             ncol=ncols, fontsize=8
         )
-    elif nota_lineas:
-        espacio_inferior = 0.1 + 0.035 * len(nota_lineas)
-        fig.subplots_adjust(bottom=espacio_inferior)
 
     if nota_lineas:
+        y_notas_top = espacio_inferior - ALTO_TICKS_XLABEL - alto_leyenda - SEP_LEYENDA_NOTA
         fig.text(
-            0.5, 0.01, "\n".join(nota_lineas),
-            ha='center', va='bottom', fontsize=7.5, color='#bbbbbb', wrap=True
+            0.5, y_notas_top, "\n".join(nota_lineas),
+            ha='center', va='top', fontsize=7.5, color='#bbbbbb', wrap=True,
+            transform=fig.transFigure
         )
 
 
