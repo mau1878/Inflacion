@@ -305,9 +305,9 @@ def graficar_activos_ajustados(
                 fig.add_trace(
                     go.Scatter(
                         x=stock_data.index, y=pct_change, mode='lines',
-                        name=f'{display_name} (Ajustado, %)',
+                        name=f'{display_name} — ARS reales (%)',
                         line=dict(color=color, width=data_line_width), yaxis='y1',
-                        hovertemplate='Fecha: %{x|%Y-%m-%d}<br>Variación: %{y:.2f}%<extra></extra>'
+                        hovertemplate='Fecha: %{x|%Y-%m-%d}<br>Variación (ARS reales): %{y:.2f}%<extra></extra>'
                     )
                 )
                 fig.add_shape(
@@ -315,7 +315,7 @@ def graficar_activos_ajustados(
                     y0=0, y1=0, line=dict(color="rgba(255, 0, 0, 0.5)", width=1, dash="dash"),
                     xref="x", yref="y1"
                 )
-                ax_mpl.plot(stock_data.index, pct_change, color=color, linewidth=data_line_width, label=f'{display_name} (Ajustado, %)')
+                ax_mpl.plot(stock_data.index, pct_change, color=color, linewidth=data_line_width, label=f'{display_name} — ARS reales (%)')
                 ax_mpl.axhline(0, color='red', linewidth=1, linestyle='--', alpha=0.5)
 
                 if show_nominal_ghost:
@@ -357,19 +357,22 @@ def graficar_activos_ajustados(
                         else:
                             pct_change_mep = (close_mep_pct / close_mep_pct.iloc[0] - 1) * 100
 
+                        etiqueta_mep_legend = 'USD MEP reales' if etiqueta_mep_pct == 'USD MEP real' else 'USD MEP'
                         fig.add_trace(
                             go.Scatter(
                                 x=stock_data.index, y=pct_change_mep, mode='lines',
-                                name=f'{display_name} ({etiqueta_mep_pct}, %)',
+                                name=f'{display_name} — {etiqueta_mep_legend} (%)',
                                 line=dict(color=MEP_GHOST_COLOR, width=1.3, dash='dashdot'),
                                 yaxis='y1', opacity=0.75,
-                                hovertemplate=f'Fecha: %{{x|%Y-%m-%d}}<br>{etiqueta_mep_pct}: %{{y:.2f}}%<extra></extra>'
+                                hovertemplate=f'Fecha: %{{x|%Y-%m-%d}}<br>Variación ({etiqueta_mep_legend}): %{{y:.2f}}%<extra></extra>'
                             )
                         )
                         ax_mpl.plot(
                             stock_data.index, pct_change_mep, color=MEP_GHOST_COLOR, linewidth=1.3,
-                            linestyle='-.', alpha=0.75, label=f'{display_name} ({etiqueta_mep_pct}, %)'
+                            linestyle='-.', alpha=0.75, label=f'{display_name} — {etiqueta_mep_legend} (%)'
                         )
+
+
             else:
                 fig.add_trace(
                     go.Scatter(
@@ -535,6 +538,28 @@ def graficar_activos_ajustados(
         )
 
     st.plotly_chart(fig, use_container_width=True)
+
+    if show_mep_ghost and moneda == 'ARS' and daily_mep is not None and not daily_mep.empty:
+        if is_percentage_mode:
+            st.caption(
+                "ℹ️ Ambas líneas parten de 0% en la fecha de inicio del gráfico. La brecha entre "
+                "ellas es la ganancia/pérdida real en dólares MEP por encima (o por debajo) del "
+                "ajuste por inflación argentina — no son dos mediciones del mismo concepto."
+            )
+        elif mep_ghost_modo == 'rebasado':
+            st.caption(
+                "ℹ️ La línea de USD MEP arranca en el mismo valor que el precio ajustado del "
+                "ticker en la fecha de inicio y comparte el mismo eje. La brecha que se abre a "
+                "partir de ahí es la ganancia/pérdida real en dólares MEP — no representa el "
+                "precio real en USD."
+            )
+        else:
+            st.caption(
+                "⚠️ La línea de USD MEP usa un eje derecho independiente, con su propia escala "
+                "automática. Un cruce o acercamiento entre las líneas no implica igualdad de "
+                "valor: para comparar rendimientos relativos, usá la opción \"Rebasado al precio "
+                "inicial\"."
+            )
 
     _finalizar_grafico_mpl(fig_mpl, ax_mpl, titulo, ylabel, is_percentage_mode, use_log_scale, ax2=ax_mpl2)
     st.pyplot(fig_mpl)
