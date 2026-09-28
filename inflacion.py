@@ -2306,6 +2306,34 @@ with tab3:
 
                 st.plotly_chart(fig, use_container_width=True)
 
+                # ── Gráfico gemelo Matplotlib/Seaborn ──
+                es_pct_custom = show_percentage or show_percentage_from_recent
+                serie_mpl = custom_series_pct if es_pct_custom else adjusted_series
+                nombre_mpl = custom_expression if len(custom_expression) <= 40 else custom_expression[:40] + '...'
+
+                fig_mpl, ax_mpl = plt.subplots(figsize=(11, 5.5))
+                ax_mpl.plot(
+                    serie_mpl.index, serie_mpl,
+                    color=colors[-1], linewidth=data_line_width,
+                    label=f'Custom: {nombre_mpl}'
+                )
+                if es_pct_custom:
+                    ax_mpl.axhline(0, color='red', linewidth=1, linestyle='--', alpha=0.5)
+
+                for dt, _ in eventos_custom:
+                    ax_mpl.axvline(dt, color='yellow', linewidth=1, linestyle=':', alpha=0.7)
+                for dt, _ in splits_custom:
+                    ax_mpl.axvline(dt, color='white', linewidth=1, linestyle='--', alpha=0.7)
+
+                _finalizar_grafico_mpl(
+                    fig_mpl, ax_mpl, plot_title,
+                    'Variación (%)' if es_pct_custom else 'Valor Ajustado (ARS)',
+                    es_pct_custom,
+                    (not es_pct_custom) and use_log_scale_arg
+                )
+                st.pyplot(fig_mpl)
+                plt.close(fig_mpl)
+
         except Exception as e:
             available_vars = ', '.join(ticker_var_map.values())
             st.error(f"Error al evaluar la expresión: {e}\n\nVariables disponibles: {available_vars}")
