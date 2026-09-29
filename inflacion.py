@@ -1766,6 +1766,48 @@ if st.sidebar.button("Guardar eventos"):
 
 if st.session_state.custom_events:
     st.sidebar.caption(f"{len(st.session_state.custom_events)} eventos cargados.")
+
+# ------------------------------------------------------------------
+# Helpers para la pestaña Custom Calculations (independiente de la pestaña Argentina)
+# ------------------------------------------------------------------
+_TICKER_REGEX = re.compile(r'(?<![A-Za-z0-9_.])\^?[A-Za-z][A-Za-z0-9]*(?:\.[A-Za-z]{1,3})?(?![A-Za-z0-9_])')
+
+
+def detectar_tickers_expresion(expr):
+    """Devuelve [(inicio, fin, TICKER)] con los tickers hallados en la expresión.
+    Ignora funciones (nombre seguido de '('), métodos (.mean) y números (1e3)."""
+    hallados = []
+    for m in _TICKER_REGEX.finditer(expr):
+        if expr[m.end():].lstrip().startswith('('):
+            continue
+        hallados.append((m.start(), m.end(), m.group(0).upper()))
+    return hallados
+
+
+def nombre_variable_ticker(ticker):
+    return ticker.replace('^', 'IDX_').replace('.', '_')
+
+
+def obtener_serie_nominal(ticker, start, end, source, metodo_cupones='limpio'):
+    """Descarga un ticker y aplica el mismo pipeline que la pestaña Argentina
+    (splits + cupones), devolviendo la serie 'Close' nominal, o None si no hay datos."""
+    df = descargar_datos(ticker, start, end, source)
+    if df is None or df.empty:
+        return None
+    df = df.copy()
+    if 'Date' in df.columns:
+        df.set_index('Date', inplace=True)
+    df.index = pd.to_datetime(df.index)
+    if df.index.tz is not None:
+        df.index = df.index.tz_localize(None)
+    df.index = df.index.normalize()
+    if source in ['IOL (Invertir Online)', 'ByMA Data'] and len(df.columns) == 1:
+        df = df.rename(columns={df.columns[0]: 'Close'})
+    df = df[~df.index.duplicated(keep='last')]
+    df = ajustar_precios_por_splits(df, ticker)
+    df = ajustar_precios_por_cupones(df, ticker, cashflows_bonos, daily_mep, metodo=metodo_cupones)
+    return df['Close'] if 'Close' in df.columns else None
+
 # Main content in tabs
 tab1, tab2, tab3, tab4, tab5 = st.tabs(["Inflation Calculator", "Argentine Stock Adjuster", "Custom Calculations", "Volatility Analysis", "US Stock Adjuster"])
 
@@ -2144,21 +2186,20 @@ with tab2:
 with tab3:
     st.subheader('Cálculos o Ratios Personalizados')
 
-    st.markdown("""  
-        Puedes definir expresiones matemáticas personalizadas utilizando los tickers cargados.  
-        **Ejemplo:** `META*(YPFD.BA / YPF)/20`  
+    st.markdown("""
+        Esta pestaña es **independiente**: detecta los tickers dentro de la expresión y los descarga
+        por su cuenta (usa la fuente de datos elegida en la barra lateral).
 
-        **Instrucciones:**  
-        - Usa los tickers tal como los ingresaste (incluyendo `.BA` si corresponde).  
-        - Los tickers con puntos (`.`) serán automáticamente reemplazados por guiones bajos (`_`) en la evaluación.  
-        - Por lo tanto, la expresión anterior se transformará internamente a: `META*(YPFD_BA / YPF)/20`  
-        - Asegúrate de que todos los tickers utilizados en la expresión estén cargados y escritos correctamente.  
-        - Puedes usar operadores matemáticos básicos: `+`, `-`, `*`, `/`, `**`, etc.  
-        - Puedes usar funciones de `pandas` como `mean()`, `max()`, etc.  
+        **Ejemplo:** `META*(YPFD.BA / YPF)/20`
+
+        **Instrucciones:**
+        - Escribí los tickers tal cual se usan en la fuente de datos (con `.BA` si corresponde, o `^MERV`).
+        - Operadores permitidos: `+`, `-`, `*`, `/`, `**`, paréntesis, y funciones/métodos de `pandas` (`mean()`, `max()`, etc.).
+        - Tickers con guion (ej. `BRK-B`) no se detectan por la ambigüedad con la resta.
     """)
 
     custom_expression = st.text_input(
-        'Ingresa una expresión personalizada usando los tickers cargados, operadores matemáticos y funciones:',
+        'Ingresa una expresión personalizada usando tickers, operadores matemáticos y funciones:',
         placeholder='Por ejemplo: META*(YPFD.BA / YPF)/20',
         key='custom_expression_input'
     )
@@ -2170,36 +2211,89 @@ with tab3:
         key='custom_title_input'
     )
 
+    ajuste_modo_custom = st.radio(
+        'Ajuste por inflación del resultado:',
+        (
+            'No ajustar (ratios / valores sin unidad)',
+            'Ajustar por inflación (resultado en ARS)',
+        ),
+        index=0,
+        key='ajuste_modo_custom',
+        help=(
+            'Un ratio entre dos precios en ARS (ej. ECOG.BA/METR.BA) no tiene unidad: la '
+            'inflación se cancela, así que NO hay que ajustarlo (coincide con TradingView). '
+            'Ajustá solo si la expresión devuelve un precio en pesos (ej. 2*GGAL.BA).'
+        )
+    )
+
+    cust_start_date = st.date_input(
+        'Fecha de inicio del gráfico:',
+        min_value=daily_cpi.index.min().date(),
+        max_value=daily_cpi.index.max().date(),
+        value=(daily_cpi.index.max() - timedelta(days=365)).date(),
+        key='custom_start_date_input'
+    )
+    cust_end_date = st.date_input(
+        'Fecha de fin del gráfico:',
+        min_value=cust_start_date,
+        max_value=daily_cpi.index.max().date(),
+        value=daily_cpi.index.max().date(),
+        key='custom_end_date_input'
+    )
+    cust_show_pct = st.checkbox('Mostrar como variación porcentual desde el inicio', value=False, key='custom_show_pct')
+    cust_show_pct_recent = st.checkbox('Mostrar como variación porcentual desde el valor más reciente', value=False, key='custom_show_pct_recent')
+    cust_is_pct = cust_show_pct or cust_show_pct_recent
+    if not cust_is_pct:
+        cust_use_log = st.checkbox('Usar escala logarítmica en el eje Y', value=False, key='custom_use_log')
+    else:
+        cust_use_log = False
+    cust_retorno_total = st.checkbox(
+        'Bonos: usar retorno total (cupones reinvertidos) en vez de precio limpio',
+        value=False, key='custom_retorno_total'
+    )
+    cust_metodo_cupones = 'retorno_total' if cust_retorno_total else 'limpio'
+
     if custom_expression:
         try:
             # ------------------------------------------------------------------
-            # 1. Detectar tickers usados en la expresión
+            # 1. Detectar tickers usados en la expresión y armar la expresión a evaluar
             # ------------------------------------------------------------------
-            sorted_tickers = sorted(ticker_var_map.keys(), key=len, reverse=True)
+            tokens = detectar_tickers_expresion(custom_expression)
+            used_tickers = list(dict.fromkeys(tk for _, _, tk in tokens))
+            used_ba_tickers = {tk for tk in used_tickers if tk.endswith('.BA')}
+
             transformed_expression = custom_expression
-            used_tickers = set()
-            used_ba_tickers = set()
-
-            for ticker in sorted_tickers:
-                if ticker in custom_expression:
-                    used_tickers.add(ticker)
-                    var_name = ticker_var_map[ticker]
-                    pattern = re.escape(ticker)
-                    transformed_expression = re.sub(rf'\b{pattern}\b', var_name, transformed_expression)
-                    if ticker.endswith('.BA'):
-                        used_ba_tickers.add(ticker)
+            for ini, fin, tk in sorted(tokens, key=lambda x: x[0], reverse=True):
+                transformed_expression = (
+                    transformed_expression[:ini] + nombre_variable_ticker(tk) + transformed_expression[fin:]
+                )
 
             # ------------------------------------------------------------------
-            # 2. DataFrame combinado
+            # 2. Descarga propia + DataFrame combinado
             # ------------------------------------------------------------------
-            combined_nominal_df = pd.DataFrame({
-                ticker_var_map[ticker]: stock_data_dict_nominal_arg[ticker_var_map[ticker]]
-                for ticker in used_tickers
-            })
-            combined_nominal_df.dropna(inplace=True)
+            end_download = cust_end_date + timedelta(days=1)
+            series_nominales, faltantes = {}, []
+            for tk in used_tickers:
+                serie = obtener_serie_nominal(tk, cust_start_date, end_download, data_source, cust_metodo_cupones)
+                if serie is None or serie.empty:
+                    faltantes.append(tk)
+                else:
+                    series_nominales[nombre_variable_ticker(tk)] = serie
+
+            if not used_tickers:
+                st.error("No se detectó ningún ticker en la expresión.")
+            elif faltantes:
+                st.error(f"No se encontraron datos para: {', '.join(faltantes)}.")
+
+            if faltantes or not series_nominales:
+                combined_nominal_df = pd.DataFrame()
+            else:
+                combined_nominal_df = pd.DataFrame(series_nominales)
+                combined_nominal_df.dropna(inplace=True)
 
             if combined_nominal_df.empty:
-                st.error("No hay datos disponibles para todos los tickers seleccionados en las fechas especificadas.")
+                if not faltantes and used_tickers:
+                    st.error("No hay fechas en común entre todos los tickers de la expresión en el rango elegido.")
             else:
                 # ------------------------------------------------------------------
                 # 3. Evaluar expresión
@@ -2210,9 +2304,10 @@ with tab3:
                 # ------------------------------------------------------------------
                 # 4. Ajuste por inflación si hay algún .BA
                 # ------------------------------------------------------------------
-                if used_ba_tickers:
+                aplicar_ajuste_custom = bool(used_ba_tickers) and ajuste_modo_custom.startswith('Ajustar')
+                if aplicar_ajuste_custom:
                     custom_series_nominal = custom_series_nominal.join(daily_cpi, how='inner')
-                    custom_series_nominal['Cumulative_Inflation'].ffill(inplace=True)
+                    custom_series_nominal['Cumulative_Inflation'] = custom_series_nominal['Cumulative_Inflation'].ffill()
                     custom_series_nominal.dropna(subset=['Cumulative_Inflation'], inplace=True)
                     custom_series_nominal['Inflation_Adjusted_Custom'] = custom_series_nominal['Custom_Nominal'] * (
                         custom_series_nominal['Cumulative_Inflation'].iloc[-1] / custom_series_nominal['Cumulative_Inflation']
@@ -2227,10 +2322,10 @@ with tab3:
                 fig = go.Figure()
 
                 # ── Traza principal ──
-                if show_percentage or show_percentage_from_recent:
-                    if show_percentage_from_recent:
-                        custom_series_pct = (adjusted_series / adjusted_series.iloc[-1] - 1) * 100
-                        custom_series_pct = -custom_series_pct
+                if cust_is_pct:
+                    if cust_show_pct_recent:
+                        custom_series_pct = ((adjusted_series.iloc[-1] / adjusted_series) - 1) * 100
+                        custom_series_pct = custom_series_pct.clip(lower=-100)
                     else:
                         custom_series_pct = (adjusted_series / adjusted_series.iloc[0] - 1) * 100
 
@@ -2250,11 +2345,11 @@ with tab3:
                         mode='lines',
                         name=f'Custom: {custom_expression[:15]}...' if len(custom_expression) > 15 else custom_expression,
                         line=dict(color=colors[-1], width=2),
-                        hovertemplate='Fecha: %{x|%Y-%m-%d}<br>Valor: %{y:.2f} ARS<extra></extra>'
+                        hovertemplate='Fecha: %{x|%Y-%m-%d}<br>Valor: %{y:.2f}' + (' ARS' if aplicar_ajuste_custom else '') + '<extra></extra>'
                     ))
 
                 # ── Eventos y splits (líneas sin texto fijo, info al pasar el mouse) ──
-                serie_top = custom_series_pct if (show_percentage or show_percentage_from_recent) else adjusted_series
+                serie_top = custom_series_pct if cust_is_pct else adjusted_series
                 y_top_custom = serie_top.max()
 
                 eventos_custom = [
@@ -2273,25 +2368,31 @@ with tab3:
                 if custom_title.strip():
                     plot_title = custom_title.strip()
                 else:
-                    if show_percentage or show_percentage_from_recent:
+                    if cust_is_pct:
                         plot_title = 'Ratio / Cálculo Personalizado (%)'
                     else:
-                        plot_title = 'Ratio / Cálculo Personalizado Ajustado por Inflación'
+                        plot_title = (
+                            'Ratio / Cálculo Personalizado Ajustado por Inflación'
+                            if aplicar_ajuste_custom else
+                            'Ratio / Cálculo Personalizado (nominal)'
+                        )
 
                 fig.update_layout(
                     title=dict(text=plot_title, font=dict(size=20, color='white')),
                     xaxis_title=dict(text='Fecha', font=dict(size=14, color='white')),
                     yaxis_title=dict(
-                        text='Variación (%)' if (show_percentage or show_percentage_from_recent) else 'Valor Ajustado (ARS)',
+                        text='Variación (%)' if cust_is_pct else (
+                            'Valor Ajustado (ARS)' if aplicar_ajuste_custom else 'Valor'
+                        ),
                         font=dict(size=14, color='white')
                     ),
                     **plot_style
                 )
 
                 fig.update_yaxes(
-                    type='log' if (not (show_percentage or show_percentage_from_recent) and use_log_scale_arg) else 'linear',
+                    type='log' if (not cust_is_pct and cust_use_log) else 'linear',
                     tickformat=',.2f',
-                    ticksuffix='%' if (show_percentage or show_percentage_from_recent) else ''
+                    ticksuffix='%' if cust_is_pct else ''
                 )
 
                 # Watermark
@@ -2307,7 +2408,7 @@ with tab3:
                 st.plotly_chart(fig, use_container_width=True)
 
                 # ── Gráfico gemelo Matplotlib/Seaborn ──
-                es_pct_custom = show_percentage or show_percentage_from_recent
+                es_pct_custom = cust_is_pct
                 serie_mpl = custom_series_pct if es_pct_custom else adjusted_series
                 nombre_mpl = custom_expression if len(custom_expression) <= 40 else custom_expression[:40] + '...'
 
@@ -2327,16 +2428,17 @@ with tab3:
 
                 _finalizar_grafico_mpl(
                     fig_mpl, ax_mpl, plot_title,
-                    'Variación (%)' if es_pct_custom else 'Valor Ajustado (ARS)',
+                    'Variación (%)' if es_pct_custom else (
+                        'Valor Ajustado (ARS)' if aplicar_ajuste_custom else 'Valor'
+                    ),
                     es_pct_custom,
-                    (not es_pct_custom) and use_log_scale_arg
+                    (not es_pct_custom) and cust_use_log
                 )
                 st.pyplot(fig_mpl)
                 plt.close(fig_mpl)
 
         except Exception as e:
-            available_vars = ', '.join(ticker_var_map.values())
-            st.error(f"Error al evaluar la expresión: {e}\n\nVariables disponibles: {available_vars}")
+            st.error(f"Error al evaluar la expresión: {e}")
 
 with tab4:
     st.subheader('Comparación de Volatilidad Histórica Ajustada por Inflación y Precio Ajustado por Inflación (Argentina)')
