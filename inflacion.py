@@ -1788,6 +1788,24 @@ def nombre_variable_ticker(ticker):
     return ticker.replace('^', 'IDX_').replace('.', '_')
 
 
+def split_expresiones(expr):
+    """Divide una entrada por comas de primer nivel (fuera de paréntesis/corchetes),
+    para poder graficar varias expresiones a la vez: 'A/B, A/C'."""
+    partes, nivel, actual = [], 0, []
+    for ch in expr:
+        if ch in '([{':
+            nivel += 1
+        elif ch in ')]}':
+            nivel -= 1
+        if ch == ',' and nivel == 0:
+            partes.append(''.join(actual))
+            actual = []
+        else:
+            actual.append(ch)
+    partes.append(''.join(actual))
+    return [x.strip() for x in partes if x.strip()]
+
+
 def obtener_serie_nominal(ticker, start, end, source, metodo_cupones='limpio'):
     """Descarga un ticker y aplica el mismo pipeline que la pestaña Argentina
     (splits + cupones), devolviendo la serie 'Close' nominal, o None si no hay datos."""
@@ -2296,61 +2314,65 @@ with tab3:
                     st.error("No hay fechas en común entre todos los tickers de la expresión en el rango elegido.")
             else:
                 # ------------------------------------------------------------------
-                # 3. Evaluar expresión
+                # 3. Evaluar expresión(es) — se admiten varias separadas por coma
                 # ------------------------------------------------------------------
-                custom_series_nominal = combined_nominal_df.eval(transformed_expression, engine='python')
-                custom_series_nominal = custom_series_nominal.to_frame(name='Custom_Nominal')
+                exprs_orig = split_expresiones(custom_expression)
+                exprs_trans = split_expresiones(transformed_expression)
 
                 # ------------------------------------------------------------------
-                # 4. Ajuste por inflación si hay algún .BA
+                # 4. Ajuste por inflación (solo si el usuario lo pide y hay algún .BA)
                 # ------------------------------------------------------------------
                 aplicar_ajuste_custom = bool(used_ba_tickers) and ajuste_modo_custom.startswith('Ajustar')
+                factor_cpi = None
                 if aplicar_ajuste_custom:
-                    custom_series_nominal = custom_series_nominal.join(daily_cpi, how='inner')
-                    custom_series_nominal['Cumulative_Inflation'] = custom_series_nominal['Cumulative_Inflation'].ffill()
-                    custom_series_nominal.dropna(subset=['Cumulative_Inflation'], inplace=True)
-                    custom_series_nominal['Inflation_Adjusted_Custom'] = custom_series_nominal['Custom_Nominal'] * (
-                        custom_series_nominal['Cumulative_Inflation'].iloc[-1] / custom_series_nominal['Cumulative_Inflation']
-                    )
-                    adjusted_series = custom_series_nominal['Inflation_Adjusted_Custom']
-                else:
-                    adjusted_series = custom_series_nominal['Custom_Nominal']
+                    cpi_alineado = daily_cpi.reindex(combined_nominal_df.index).ffill().bfill()
+                    factor_cpi = cpi_alineado.iloc[-1] / cpi_alineado
+
+                series_finales = {}
+                for ex_o, ex_t in zip(exprs_orig, exprs_trans):
+                    resultado = combined_nominal_df.eval(ex_t, engine='python')
+                    if not isinstance(resultado, pd.Series):
+                        raise ValueError(f"'{ex_o}' no devuelve una serie de valores.")
+                    if factor_cpi is not None:
+                        resultado = (resultado * factor_cpi).dropna()
+                    series_finales[ex_o] = resultado
 
                 # ------------------------------------------------------------------
                 # 5. Gráfico
                 # ------------------------------------------------------------------
                 fig = go.Figure()
 
-                # ── Traza principal ──
-                if cust_is_pct:
-                    if cust_show_pct_recent:
-                        custom_series_pct = ((adjusted_series.iloc[-1] / adjusted_series) - 1) * 100
-                        custom_series_pct = custom_series_pct.clip(lower=-100)
+                # ── Trazas principales (una por expresión) ──
+                series_plot = {}
+                for k, (ex_o, serie) in enumerate(series_finales.items()):
+                    if cust_is_pct:
+                        if cust_show_pct_recent:
+                            serie_p = ((serie.iloc[-1] / serie) - 1) * 100
+                            serie_p = serie_p.clip(lower=-100)
+                        else:
+                            serie_p = (serie / serie.iloc[0] - 1) * 100
                     else:
-                        custom_series_pct = (adjusted_series / adjusted_series.iloc[0] - 1) * 100
-
+                        serie_p = serie
+                    series_plot[ex_o] = serie_p
+                    nombre_traza = ex_o if len(ex_o) <= 40 else ex_o[:40] + '...'
                     fig.add_trace(go.Scatter(
-                        x=custom_series_pct.index,
-                        y=custom_series_pct,
+                        x=serie_p.index,
+                        y=serie_p,
                         mode='lines',
-                        name=f'Custom: {custom_expression[:15]}...' if len(custom_expression) > 15 else custom_expression,
-                        line=dict(color=colors[-1], width=2),
-                        hovertemplate='Fecha: %{x|%Y-%m-%d}<br>Variación: %{y:.2f}%<extra></extra>'
+                        name=nombre_traza,
+                        line=dict(color=colors[(len(colors) - 1 - k) % len(colors)], width=2),
+                        hovertemplate=(
+                            f'{nombre_traza}<br>Fecha: %{{x|%Y-%m-%d}}<br>'
+                            + ('Variación: %{y:.2f}%' if cust_is_pct else
+                               'Valor: %{y:.2f}' + (' ARS' if aplicar_ajuste_custom else ''))
+                            + '<extra></extra>'
+                        )
                     ))
+                if cust_is_pct:
                     fig.add_hline(y=0, line=dict(color="rgba(255,0,0,0.5)", dash="dash"))
-                else:
-                    fig.add_trace(go.Scatter(
-                        x=adjusted_series.index,
-                        y=adjusted_series,
-                        mode='lines',
-                        name=f'Custom: {custom_expression[:15]}...' if len(custom_expression) > 15 else custom_expression,
-                        line=dict(color=colors[-1], width=2),
-                        hovertemplate='Fecha: %{x|%Y-%m-%d}<br>Valor: %{y:.2f}' + (' ARS' if aplicar_ajuste_custom else '') + '<extra></extra>'
-                    ))
 
                 # ── Eventos y splits (líneas sin texto fijo, info al pasar el mouse) ──
-                serie_top = custom_series_pct if cust_is_pct else adjusted_series
-                y_top_custom = serie_top.max()
+                y_top_custom = max(sp.max() for sp in series_plot.values())
 
                 eventos_custom = [
                     (datetime.combine(e["date"], datetime.min.time()), e["description"])
@@ -2409,15 +2431,14 @@ with tab3:
 
                 # ── Gráfico gemelo Matplotlib/Seaborn ──
                 es_pct_custom = cust_is_pct
-                serie_mpl = custom_series_pct if es_pct_custom else adjusted_series
-                nombre_mpl = custom_expression if len(custom_expression) <= 40 else custom_expression[:40] + '...'
-
                 fig_mpl, ax_mpl = plt.subplots(figsize=(11, 5.5))
-                ax_mpl.plot(
-                    serie_mpl.index, serie_mpl,
-                    color=colors[-1], linewidth=data_line_width,
-                    label=f'Custom: {nombre_mpl}'
-                )
+                for k, (ex_o, serie_m) in enumerate(series_plot.items()):
+                    nombre_mpl = ex_o if len(ex_o) <= 40 else ex_o[:40] + '...'
+                    ax_mpl.plot(
+                        serie_m.index, serie_m,
+                        color=colors[(len(colors) - 1 - k) % len(colors)], linewidth=data_line_width,
+                        label=nombre_mpl
+                    )
                 if es_pct_custom:
                     ax_mpl.axhline(0, color='red', linewidth=1, linestyle='--', alpha=0.5)
 
