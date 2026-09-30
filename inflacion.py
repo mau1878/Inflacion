@@ -2306,8 +2306,8 @@ with tab3:
             if faltantes or not series_nominales:
                 combined_nominal_df = pd.DataFrame()
             else:
+                # Unión de fechas (sin dropna global): cada expresión recorta solo con SUS tickers
                 combined_nominal_df = pd.DataFrame(series_nominales)
-                combined_nominal_df.dropna(inplace=True)
 
             if combined_nominal_df.empty:
                 if not faltantes and used_tickers:
@@ -2330,12 +2330,38 @@ with tab3:
 
                 series_finales = {}
                 for ex_o, ex_t in zip(exprs_orig, exprs_trans):
-                    resultado = combined_nominal_df.eval(ex_t, engine='python')
+                    # Rango propio: solo los tickers de esta expresión, sin fechas con NaN
+                    vars_expr = list(dict.fromkeys(
+                        nombre_variable_ticker(tk) for _, _, tk in detectar_tickers_expresion(ex_o)
+                    ))
+                    df_expr = combined_nominal_df[vars_expr].dropna()
+                    if df_expr.empty:
+                        st.warning(f"'{ex_o}': no hay fechas en común entre sus tickers en el rango elegido. Se omite.")
+                        continue
+
+                    resultado = df_expr.eval(ex_t, engine='python')
                     if not isinstance(resultado, pd.Series):
                         raise ValueError(f"'{ex_o}' no devuelve una serie de valores.")
                     if factor_cpi is not None:
                         resultado = (resultado * factor_cpi).dropna()
+                    resultado = resultado.dropna()
+                    if resultado.empty:
+                        st.warning(f"'{ex_o}': el resultado no tiene datos válidos. Se omite.")
+                        continue
+
+                    # Aviso si la serie empieza bastante después del inicio pedido
+                    inicio_real = resultado.index[0].date()
+                    if (inicio_real - cust_start_date).days > 7:
+                        st.warning(
+                            f"'{ex_o}' tiene datos recién desde {inicio_real:%Y-%m-%d} "
+                            f"(pediste desde {cust_start_date:%Y-%m-%d})."
+                        )
+                        if cust_show_pct:
+                            st.caption(f"En '{ex_o}', el 0% corresponde a {inicio_real:%Y-%m-%d}, no es comparable con las demás líneas.")
                     series_finales[ex_o] = resultado
+
+                if not series_finales:
+                    raise ValueError("Ninguna expresión tiene datos para graficar.")
 
                 # ------------------------------------------------------------------
                 # 5. Gráfico
