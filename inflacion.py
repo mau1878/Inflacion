@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import yfinance as yf
+from merval_msci import empalmar_merval, a_escala_msci
 import plotly.graph_objs as go
 from datetime import datetime, timedelta
 import logging
@@ -1127,6 +1128,9 @@ def descargar_datos(ticker, start, end, source='YFinance'):
         else:
             logger.error(f"Unknown data source: {source}")
             return pd.DataFrame()
+        if ticker_upper == '^MERV':
+            df = empalmar_merval(df, start, pd.Timestamp(end) - pd.Timedelta(days=1))  # S&P Merval -> MSCI Merval (desde 17/10/2026)
+            df = a_escala_msci(df)  # todo ^MERV en escala MSCI (16/10/2026 = 100.000)
         time.sleep(5)
         return df
     except Exception as e:
