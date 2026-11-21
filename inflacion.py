@@ -885,8 +885,9 @@ def descargar_datos_yfinance(ticker, start, end):
     try:
         cache_file = f"cache/{ticker}_{start}_{end}.csv"
         os.makedirs("cache", exist_ok=True)
+        usar_cache = ticker.upper() != '^MERV'  # ^MERV se empalma después: no cachear el dato crudo (Yahoo lo trae recortado)
 
-        if os.path.exists(cache_file):
+        if usar_cache and os.path.exists(cache_file):
             df = pd.read_csv(cache_file, parse_dates=['Date'])
             logger.info(f"Datos cargados desde caché para {ticker}")
             return df
@@ -924,8 +925,9 @@ def descargar_datos_yfinance(ticker, start, end):
                 logger.error(f"No 'Close' column found for {ticker}.")
                 return pd.DataFrame()
 
-        close.to_csv(cache_file)
-        logger.info(f"Datos guardados en caché para {ticker}")
+        if usar_cache:
+            close.to_csv(cache_file)
+            logger.info(f"Datos guardados en caché para {ticker}")
 
         return close
 
@@ -1098,6 +1100,42 @@ def descargar_datos_byma(ticker, start_date, end_date):
         logger.error(f"Error downloading data from ByMA Data for {ticker}: {e}")
         return pd.DataFrame()
 
+# ─── HISTÓRICO ^MERV (Stooq ^MRV, 1988 -> 16/10/2026, escala S&P Merval) ───
+# Yahoo dejó de devolver el histórico del S&P Merval (solo trae el 16/10/2026), así que este archivo
+# completa todo lo anterior al primer dato disponible. Actualizar data/mrv_historico.txt cuando haga falta.
+MERVAL_HISTORICO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'mrv_historico.txt')
+
+def extender_con_historico_merval(df, start):
+    """Completa hacia atrás un df de ^MERV (columna 'Close', índice de fechas o columna 'Date')
+    con el histórico de Stooq, todo lo que quede antes de su primer dato y desde `start`."""
+    try:
+        hist = pd.read_csv(MERVAL_HISTORICO_PATH)
+        hist['Date'] = pd.to_datetime(hist['<DATE>'].astype(str), format='%Y%m%d')
+        hist = hist.sort_values('Date').drop_duplicates('Date').set_index('Date')[['<CLOSE>']].rename(columns={'<CLOSE>': 'Close'})
+    except Exception as e:
+        logger.error(f"No se pudo leer el histórico Stooq de ^MERV: {e}")
+        return df
+    had_date_col = df is not None and 'Date' in getattr(df, 'columns', [])
+    work = df.copy() if df is not None else pd.DataFrame()
+    if had_date_col:
+        work = work.set_index('Date')
+    if not work.empty:
+        work.index = pd.to_datetime(work.index)
+        if work.index.tz is not None:
+            work.index = work.index.tz_localize(None)
+        work.index = work.index.normalize()
+        corte = work.index.min()
+        work = work[['Close']] if 'Close' in work.columns else work.iloc[:, [-1]].set_axis(['Close'], axis=1)
+    else:
+        corte = hist.index.max() + pd.Timedelta(days=1)
+    hist = hist[(hist.index < corte) & (hist.index >= pd.Timestamp(start))]
+    if hist.empty:
+        return df
+    out = pd.concat([hist, work]).sort_index()
+    out = out[~out.index.duplicated(keep='last')]
+    out.index.name = 'Date'
+    return out.reset_index() if had_date_col else out
+
 @st.cache_data(ttl=86400)
 def descargar_datos(ticker, start, end, source='YFinance'):
     ticker_upper = ticker.upper()
@@ -1129,6 +1167,7 @@ def descargar_datos(ticker, start, end, source='YFinance'):
             logger.error(f"Unknown data source: {source}")
             return pd.DataFrame()
         if ticker_upper == '^MERV':
+            df = extender_con_historico_merval(df, start)  # Stooq: histórico hasta lo que traiga la fuente
             df = empalmar_merval(df, start, pd.Timestamp(end) - pd.Timedelta(days=1))  # S&P Merval -> MSCI Merval (desde 17/10/2026)
             df = a_escala_msci(df)  # todo ^MERV en escala MSCI (16/10/2026 = 100.000)
         time.sleep(5)

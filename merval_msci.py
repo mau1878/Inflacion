@@ -42,18 +42,20 @@ _HEADERS = {
 _BASE = os.path.dirname(os.path.abspath(__file__))
 SEED_PATH = os.path.join(_BASE, "data", "merval_msci_rava.csv")  # Date,Close (respaldo + caché)
 _TTL = 3600  # segundos: no pegarle a Rava más de una vez por hora por proceso
-_mem = {"t": 0.0, "s": None}
+_mem = {"t": 0.0, "s": None, "full": False}
 
 # True  -> la serie ^MERV completa (incluido Stooq 1988-96) se expresa en escala MSCI
 #          (16/10/2026 = 100.000), igual que se publica hoy el índice.
 # False -> se mantiene la escala S&P histórica (~3 millones).
 # Los retornos % son idénticos en ambos casos; solo cambia el nivel absoluto.
 ESCALA_MSCI = True
+_status = {"rava_ok": None, "ultimo_dato": None}  # lo lee la app para avisar en pantalla
 _K = {"v": None}  # último factor S&P/MSCI calculado (lo usa a_escala_msci)
 
 
 # ------------------------------------------------------------------ Rava
 def _fetch_rava(dias=45):
+    dias = max(int(dias), 45)
     r = requests.get(RAVA_URL, params={"dias": dias}, headers=_HEADERS, timeout=20)
     r.raise_for_status()
     df = pd.DataFrame(r.json()["datos"])
@@ -69,13 +71,34 @@ def _read_seed():
         return pd.Series(dtype=float)
 
 
-def get_msci_merval(force=False):
-    """Serie MSCI Merval (escala MSCI) = respaldo local + Rava (lo de Rava pisa)."""
-    if not force and _mem["s"] is not None and time.time() - _mem["t"] < _TTL:
+def get_msci_merval(force=False, full=False):
+    """Serie MSCI Merval (escala MSCI) = respaldo local + Rava (lo de Rava pisa).
+    full=True intenta traer TODO el histórico que Rava tenga (se usa cuando yfinance
+    perdió el histórico del S&P Merval); prueba ventanas decrecientes hasta que una responda."""
+    if (not force and _mem["s"] is not None and time.time() - _mem["t"] < _TTL
+            and (_mem.get("full") or not full)):
         return _mem["s"]
     seed = _read_seed()
+    _status["rava_ok"] = None
     try:
-        live = _fetch_rava()
+        if full:
+            live, ultimo_error = None, None
+            for dias in (20000, 10000, 5000, 3000, 1500, 800, 400, 120):
+                try:
+                    live = _fetch_rava(dias)
+                    _status["rava_dias"] = dias
+                    break
+                except Exception as e:
+                    ultimo_error = e
+            if live is None:
+                raise ultimo_error or RuntimeError("Rava sin respuesta")
+        else:
+            # ventana suficiente para cubrir desde el último dato del respaldo (+ margen)
+            dias = 120 if seed.empty else (pd.Timestamp.today().normalize() - seed.index.max()).days + 15
+            live = _fetch_rava(max(dias, 120))
+        _status["rava_ok"] = True
+        _status["rava_filas"] = len(live)
+        _status["rava_primero"] = live.index.min()
         s = pd.concat([seed[~seed.index.isin(live.index)], live]).sort_index()
         try:  # persistir (en Streamlit Cloud el disco es efímero; no pasa nada si falla)
             os.makedirs(os.path.dirname(SEED_PATH), exist_ok=True)
@@ -84,8 +107,10 @@ def get_msci_merval(force=False):
             pass
     except Exception as e:
         logger.warning(f"Rava no disponible ({e}); uso respaldo local")
+        _status["rava_ok"] = False
+        _status["ultimo_dato"] = seed.index.max() if not seed.empty else None
         s = seed
-    _mem["s"], _mem["t"] = s, time.time()
+    _mem["s"], _mem["t"], _mem["full"] = s, time.time(), bool(full)
     return s
 
 
@@ -137,7 +162,12 @@ def empalmar_merval(df, start=None, end=None, price_col=None):
         else:
             col = price_col or "Close"
 
-        msci = get_msci_merval()
+        # ¿yfinance perdió el histórico del S&P Merval? (solo trae unas pocas filas <= ancla)
+        # (se mira solo el último año previo al ancla: un histórico viejo de Stooq que termina en 2024 no alcanza)
+        n_viejo = int(((work.index <= ANCHOR) & (work.index > ANCHOR - pd.Timedelta(days=365))).sum()) if not work.empty else 0
+        truncado = n_viejo < 50 and (start is None or pd.Timestamp(start) < ANCHOR - pd.Timedelta(days=60))
+        _status["yf_truncado"] = truncado
+        msci = get_msci_merval(full=truncado)
         if msci.empty:
             return df
 
@@ -163,7 +193,19 @@ def empalmar_merval(df, start=None, end=None, price_col=None):
         else:
             viejo = work[work.index <= ANCHOR]
             base = viejo[[col]] if len(work.columns) > 1 else viejo
-            out = pd.concat([base, nuevo.to_frame()]).sort_index()
+            partes = [base, nuevo.to_frame()]
+            if truncado:
+                # histórico perdido en yfinance: reconstruirlo con Rava (escala MSCI) x k = escala S&P
+                # solo se rellena lo posterior al último dato "viejo" real (p. ej. Stooq hasta 2024) y lo que falte
+                previo = base.index[base.index <= ANCHOR - pd.Timedelta(days=365)]
+                desde = previo.max() if len(previo) else pd.Timestamp.min
+                rec = msci[(msci.index > desde) & (msci.index <= ANCHOR) & (~msci.index.isin(base.index))]
+                rec = (rec * k).rename(col)
+                if start is not None:
+                    rec = rec[rec.index >= pd.Timestamp(start)]
+                _status["rava_reconstruidas"] = len(rec)
+                partes.insert(0, rec.to_frame())
+            out = pd.concat(partes).sort_index()
             out = out[~out.index.duplicated(keep="last")]
         out.index.name = work.index.name or "Date"
         return out.reset_index() if had_date_col else out
